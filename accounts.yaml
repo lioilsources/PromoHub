@@ -1,0 +1,38 @@
+# My promo accounts and the Apify tasks the hub trusts.
+#
+# apify_tasks[].id is the Apify task ID (Console → task → API → "Task ID"), not its name:
+# webhooks carry the ID and anything not listed here is rejected with 403.
+# kind decides how the dataset is mapped: x-profile, x-mentions, tiktok-profile,
+# reddit-mentions, yt-mentions, ig-profile.
+# account ("platform:handle") is the owner: profile tasks attach followers to it, mention tasks
+# use it to drop my own posts from the results.
+accounts:
+  - platform: x
+    handle: TODO_x_handle
+  - platform: tiktok
+    handle: TODO_tiktok_handle
+  - platform: youtube
+    handle: TODO_youtube_handle
+  - platform: bluesky
+    handle: TODO.bsky.social
+
+apify_tasks:
+  - name: x-profile
+    id: TODO_TASK_ID_X_PROFILE
+    kind: x-profile
+    account: x:TODO_x_handle
+    max_items: 50
+  - name: x-mentions
+    id: TODO_TASK_ID_X_MENTIONS
+    kind: x-mentions
+    account: x:TODO_x_handle
+    max_items: 100
+  - name: reddit-mentions
+    id: TODO_TASK_ID_REDDIT_MENTIONS
+    kind: reddit-mentions
+    max_items: 100
+  - name: tiktok-profile
+    id: TODO_TASK_ID_TIKTOK_PROFILE
+    kind: tiktok-profile
+    account: tiktok:TODO_tiktok_handle
+    max_items: 30

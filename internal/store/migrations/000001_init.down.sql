@@ -1,0 +1,7 @@
+DROP TABLE IF EXISTS apify_runs;
+DROP TABLE IF EXISTS events;
+DROP TABLE IF EXISTS inbound_items;
+DROP TABLE IF EXISTS metric_snapshots;
+DROP TABLE IF EXISTS content_items;
+DROP TABLE IF EXISTS apps;
+DROP TABLE IF EXISTS accounts;

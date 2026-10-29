@@ -1,0 +1,19 @@
+# promo.ol1n.com is exposed through the Cloudflare Tunnel → Caddy.
+# Only webhooks and the health check are public; /metrics stays on the internal network.
+promo.ol1n.com {
+	@public path /healthz /webhooks/*
+	handle @public {
+		reverse_proxy promohub:8080
+	}
+	handle {
+		respond 404
+	}
+	log {
+		# Webhook secrets travel in the query string; keep them out of access logs.
+		format filter {
+			request>uri query {
+				replace secret REDACTED
+			}
+		}
+	}
+}

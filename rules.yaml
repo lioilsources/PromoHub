@@ -1,0 +1,46 @@
+# Rules: on <trigger> [when <expression>] then <targets>.
+#
+# Triggers: inbound.comment | inbound.review | inbound.mention | inbound.reply |
+#           metric.snapshot | metric.delta | content.new
+# Variables:
+#   inbound.*  platform, kind, author, text, url, app, rating
+#   metric.*   platform, scope (account|content), url, text, likes, views, reposts, comments,
+#              followers, <metric>_delta (vs previous snapshot), <metric>_delta_24h,
+#              hours_since_prev, plus extras such as quotes, bookmarks, saves
+#   content.new platform, url, title, text
+# Operators: < <= > >= == != and or not ( ) · text matches /re/i · text contains "x" ·
+#            followers crosses [100, 500]
+# Targets: ifttt:<webhooks event> · telegram:<sinks.telegram name> · discord:<sinks.discord name>
+#
+# ${VAR} is expanded from the environment, so chat IDs and webhook URLs stay in .env.
+rules:
+  - name: new_review
+    on: inbound.review
+    then: ifttt:promo_review
+  - name: negative_review
+    on: inbound.review
+    when: rating <= 2
+    then: [ifttt:promo_review_urgent]
+  - name: mention
+    on: inbound.mention
+    when: text matches /(SwypeKids|Hajánek|Hajanek|OrbitronTactics|olin\.now)/i
+    then: ifttt:promo_mention
+  - name: reply
+    on: inbound.reply
+    then: ifttt:promo_mention
+  - name: viral
+    on: metric.delta
+    when: views_delta_24h > 1000 or likes_delta_24h > 100
+    then: ifttt:promo_metric_jump
+  - name: follower_milestone
+    on: metric.snapshot
+    when: scope == "account" and followers crosses [100, 500, 1000, 5000, 10000]
+    then: ifttt:promo_metric_jump
+
+# Direct sinks, bypassing IFTTT. Uncomment and set the env vars to use telegram:urgent /
+# discord:milestones in rules above.
+sinks:
+  telegram: {}
+  #  urgent: ${TELEGRAM_CHAT_ID}
+  discord: {}
+  #  milestones: ${DISCORD_WEBHOOK_MILESTONES}

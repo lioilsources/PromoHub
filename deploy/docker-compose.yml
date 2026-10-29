@@ -1,0 +1,47 @@
+# Snippet for the JODA compose stack. promohub joins the "web" network shared with Caddy;
+# Postgres stays on a private network. To use the shared Postgres on JODA instead, drop
+# promohub-db and point DATABASE_URL at it.
+services:
+  promohub:
+    image: ghcr.io/lioilsources/promohub:latest
+    # or: build: ../PromoHub
+    container_name: promohub
+    restart: unless-stopped
+    env_file: ./promohub/.env
+    volumes:
+      - ./promohub/config:/config:ro    # apps.yaml, accounts.yaml, rules.yaml
+    depends_on:
+      promohub-db:
+        condition: service_healthy
+    networks: [web, promohub]
+    mem_limit: 128m
+    labels:
+      ol1n.app: promohub
+
+  promohub-db:
+    image: postgres:17-alpine
+    container_name: promohub-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: promohub
+      POSTGRES_USER: promohub
+      POSTGRES_PASSWORD: ${PROMOHUB_DB_PASSWORD:?set PROMOHUB_DB_PASSWORD}
+    volumes:
+      - promohub-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U promohub -d promohub"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    networks: [promohub]
+    mem_limit: 256m
+    labels:
+      ol1n.app: promohub
+
+volumes:
+  promohub-db:
+
+networks:
+  web:
+    external: true
+  promohub:

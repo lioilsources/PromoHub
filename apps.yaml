@@ -1,0 +1,20 @@
+# Apps I promote. Mentions and posts are attributed to an app when its name, slug or one of its
+# keywords appears in the text. Keep in sync with Ol1nDevBot apps.yaml (source of truth).
+apps:
+  - slug: swypekids
+    name: SwypeKids
+    appstore_id: ""          # TODO numeric App Store ID
+    play_package: ""         # TODO e.g. com.ol1n.swypekids
+    keywords: [swype kids]
+    links: {}
+  - slug: hajanek
+    name: Hajánek
+    keywords: [hajanek]
+    links: {}
+  - slug: orbitron-tactics
+    name: OrbitronTactics
+    keywords: [orbitron tactics]
+    links: {}
+  - slug: olin-now
+    name: olin.now
+    links: {}
