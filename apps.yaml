@@ -18,3 +18,9 @@ apps:
   - slug: olin-now
     name: olin.now
     links: {}
+  # Not an app: the cross-app lifetime purchase (repo Pass). Mentions of it are
+  # attributed here so the "mention" rule fires; there is no store listing.
+  - slug: pass
+    name: Ol1n Pass
+    keywords: [ol1n pass, olin pass]
+    links: {web: https://olin.now/pass}

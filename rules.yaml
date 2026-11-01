@@ -23,7 +23,7 @@ rules:
     then: [ifttt:promo_review_urgent]
   - name: mention
     on: inbound.mention
-    when: text matches /(SwypeKids|Hajánek|Hajanek|OrbitronTactics|olin\.now)/i
+    when: text matches /(SwypeKids|Hajánek|Hajanek|OrbitronTactics|olin\.now|Ol1n Pass)/i
     then: ifttt:promo_mention
   - name: reply
     on: inbound.reply
