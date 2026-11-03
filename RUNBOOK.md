@@ -41,16 +41,25 @@ Logy jsou JSON na stdout: `docker logs -f promohub`.
 ### 2.2 Tasky
 Pro každý řádek níže: Store → vyber actor → **Create task** → vyplň input → Save.
 
-Actor vyber podle hodnocení a ceny v den zakládání (§9 plánu). Mapování v `internal/collectors/apifysrc` zná běžné názvy polí: `apidojo/tweet-scraper`, `clockworks/tiktok-scraper`, `trudax/reddit-scraper`, `apify/instagram-profile-scraper`, `streamers/youtube-scraper`.
+Mapování v `internal/collectors/apifysrc` je ověřené na skutečných bězích (3. 11. 2026) těchto actorů. Při jiném actoru přidej fixture do `real_test.go`.
 
-| Task (name v `accounts.yaml`) | kind | Input (zhruba) | Schedule |
-|---|---|---|---|
-| `x-profile` | `x-profile` | `twitterHandles: ["<můj handle>"]`, `maxItems: 50`, sort Latest | 2× denně |
-| `x-mentions` | `x-mentions` | `searchTerms: ["@<handle> OR SwypeKids OR Hajánek OR OrbitronTactics OR olin.now"]`, sort Latest, `maxItems: 100` | 2× denně |
-| `reddit-mentions` | `reddit-mentions` | `searches: ["SwypeKids", "Hajánek", …]`, `sort: new`, `maxItems: 100` | 2× denně |
-| `tiktok-profile` | `tiktok-profile` | `profiles: ["<handle>"]`, `resultsPerPage: 30` | 1× denně |
+| Task (name v `accounts.yaml`) | kind | Actor | Input | Schedule |
+|---|---|---|---|---|
+| `x-profile` | `x-profile` | `apidojo/tweet-scraper` | `twitterHandles: ["<můj handle>"]`, `sort: "Latest"`, `maxItems: 50` | 2× denně |
+| `x-mentions` | `x-mentions` | `apidojo/tweet-scraper` | `searchTerms: ["@<handle> OR SwypeKids OR Hajánek OR OrbitronTactics OR olin.now"]`, `sort: "Latest"`, `maxItems: 100` | 2× denně |
+| `reddit-mentions` | `reddit-mentions` | `harshmaur/reddit-scraper` | `searchTerms: ["SwypeKids", "Hajánek", …]`, `searchComments: true`, `searchSort: "new"`, `postedAfter: "1 day"`, `commentedAfter: "1 day"`, `maxPostsCount: 50`, `maxCommentsCount: 50` | 2× denně |
+| `tiktok-profile` | `tiktok-profile` | `clockworks/tiktok-scraper` | `profiles: ["<handle>"]`, `resultsPerPage: 30`, `shouldDownloadVideos: false`, `shouldDownloadCovers: false` | 1× denně |
 
-Volitelně můžeš přidat tasky `yt-mentions` (kind `yt-mentions`) a `ig-profile` (kind `ig-profile`).
+Volitelně můžeš přidat tasky:
+
+- `yt-mentions` (kind `yt-mentions`): actor `streamers/youtube-scraper` s inputem `searchQueries: [...]`, `maxResults: 20`, `maxResultsShorts: 0`, `maxResultStreams: 0`. Vlastní videa se poznají podle `channelUsername`, proto do `accounts.yaml` dej YouTube handle bez `@`.
+- `ig-profile` (kind `ig-profile`): actor `apify/instagram-profile-scraper` s inputem `usernames: ["<handle>"]`. Vrací followery a ~12 posledních postů. Kolaborační posty jiných účtů hub přeskočí.
+
+Zkušenosti z ověřovacích běhů:
+
+- `trudax/reddit-scraper` **nepoužívej**. Reddit mu obě requesty zablokoval a run přesto skončil jako SUCCEEDED s prázdným datasetem. Hub by pak tiše nedostával nic.
+- Platí to obecně: prázdný úspěšný run neznamená „žádné zmínky“. Po prvních bězích zkontroluj `items` v `apify_runs`.
+- `clockworks/tiktok-scraper` odmítne run, když je strop ceny („Max cost per run“) pod $0.50. Skutečná cena je ~$0.004 za video.
 
 U každého tasku:
 

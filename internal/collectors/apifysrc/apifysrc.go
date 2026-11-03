@@ -3,6 +3,9 @@
 // Store actors differ in field names (and change them), so every field is read from a list
 // of candidate keys. When an actor is swapped, extend the candidates here and add a fixture
 // to the tests; nothing else in the hub depends on actor output.
+//
+// Checked against real runs (2026-11-03): apidojo/tweet-scraper, clockworks/tiktok-scraper,
+// harshmaur/reddit-scraper, apify/instagram-profile-scraper, streamers/youtube-scraper.
 package apifysrc
 
 import (
@@ -130,6 +133,7 @@ func mapTikTok(b *collectors.Batch, m obj, owner string) bool {
 	}
 	extra := map[string]int64{}
 	putExtra(extra, "saves", m.num("collectCount", "bookmarkCount"))
+	putExtra(extra, "reposts", m.num("repostCount"))
 	b.Snapshots = append(b.Snapshots, collectors.Snapshot{
 		Platform: "tiktok",
 		Content: &collectors.Content{
@@ -174,8 +178,12 @@ func mapIGPost(b *collectors.Batch, m obj, owner string) bool {
 }
 
 func mapMention(b *collectors.Batch, platform, kind string, m obj, owner string) bool {
+	if dt := m.str("dataType"); dt != "" && dt != "post" && dt != "comment" {
+		return false // Reddit scrapers also emit community/user items
+	}
 	id := m.str("id", "id_str", "tweetId", "parsedId", "cid", "commentId", "videoId")
-	url := m.str("url", "twitterUrl", "link", "permalink")
+	// postUrl first: on a Reddit link post, url is the outbound link, not the thread.
+	url := m.str("postUrl", "url", "twitterUrl", "link", "permalink")
 	if id == "" {
 		id = url
 	}
@@ -184,7 +192,7 @@ func mapMention(b *collectors.Batch, platform, kind string, m obj, owner string)
 	}
 	author := m.str("author.userName", "author.username", "user.screen_name", "username", "author",
 		"authorName", "channelName", "channel.name", "authorText")
-	if owner != "" && normHandle(author) == owner {
+	if owner != "" && (normHandle(author) == owner || normHandle(m.str("channelUsername")) == owner) {
 		return false // my own post found by the keyword search
 	}
 	text := m.str("fullText", "full_text", "text", "body", "comment", "content", "description")
@@ -204,7 +212,7 @@ func mapMention(b *collectors.Batch, platform, kind string, m obj, owner string)
 	}
 	b.Inbound = append(b.Inbound, collectors.Inbound{
 		Platform: platform, Kind: k, ExternalID: id, Author: author, Text: text, URL: url,
-		CreatedAt: m.time("createdAt", "created_at", "date", "publishedAt", "publishedTimeText", "timestamp"),
+		CreatedAt: m.time("commentCreatedAt", "createdAt", "created_at", "date", "publishedAt", "publishedTimeText", "timestamp"),
 	})
 	return true
 }
