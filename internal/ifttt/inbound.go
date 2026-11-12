@@ -3,9 +3,10 @@ package ifttt
 import (
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"strings"
 	"time"
+
+	"github.com/lioilsources/promohub/internal/platform"
 )
 
 // Inbound events IFTTT applets send to POST /webhooks/ifttt[/{event}]. IFTTT Webhooks requests
@@ -68,42 +69,5 @@ func (in Inbound) Published() *time.Time {
 }
 
 // ExternalID derives a stable ID from a post URL so that the same post seen later by an
-// Apify scrape or an API collector dedups against it. Falls back to the URL itself.
-func ExternalID(platform, raw string) string {
-	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || u.Host == "" {
-		return strings.TrimSpace(raw)
-	}
-	parts := strings.FieldsFunc(u.Path, func(r rune) bool { return r == '/' })
-	after := func(seg string) string {
-		for i := 0; i+1 < len(parts); i++ {
-			if parts[i] == seg {
-				return parts[i+1]
-			}
-		}
-		return ""
-	}
-	switch platform {
-	case "youtube":
-		if v := u.Query().Get("v"); v != "" {
-			return v
-		}
-		if strings.Contains(u.Host, "youtu.be") && len(parts) > 0 {
-			return parts[0]
-		}
-		if id := after("shorts"); id != "" {
-			return id
-		}
-	case "bluesky":
-		if id := after("post"); id != "" {
-			return id
-		}
-	case "instagram":
-		for _, seg := range []string{"p", "reel", "tv"} {
-			if id := after(seg); id != "" {
-				return id
-			}
-		}
-	}
-	return strings.TrimSpace(raw)
-}
+// Apify scrape or an API collector dedups against it (see platform.ExternalID).
+func ExternalID(platform_, raw string) string { return platform.ExternalID(platform_, raw) }

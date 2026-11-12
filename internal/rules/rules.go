@@ -17,11 +17,12 @@ const (
 	OnMetricSnapshot = "metric.snapshot" // every stored snapshot
 	OnMetricDelta    = "metric.delta"    // a snapshot that has a predecessor to diff against
 	OnContentNew     = "content.new"     // first sighting of one of my posts
+	OnAccountError   = "account.error"   // a read adapter failed failAlertAt times in a row
 )
 
 var validOn = map[string]bool{
 	OnInboundComment: true, OnInboundReview: true, OnInboundMention: true, OnInboundReply: true,
-	OnMetricSnapshot: true, OnMetricDelta: true, OnContentNew: true,
+	OnMetricSnapshot: true, OnMetricDelta: true, OnContentNew: true, OnAccountError: true,
 }
 
 // Target kinds. ifttt:<event> goes to the IFTTT Webhooks service, the others to a named sink.

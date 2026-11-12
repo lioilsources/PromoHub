@@ -164,3 +164,41 @@ Fázi 1 neblokují, ale ovlivní další fáze:
 - model na Sparku,
 - Discord přes IFTTT vs. přímo (teď funguje obojí: `ifttt:` a `discord:` sink),
 - jazyk postů.
+
+---
+
+## 6. Vlna 1 — čtení přes oficiální API
+
+Hub teď sám čte Bluesky, Mastodon, YouTube, Telegram kanál a Discord. Apify ani IFTTT k tomu nepotřebuje. Plánovač běží uvnitř `serve` a stav ukládá do tabulky `collector_state`.
+
+1. Účty založ podle `Prompts/02-CHROME_PROMPTS.md`: prompty 1, 2, 5 (jen API klíč) a 6.
+2. Do `accounts.yaml` doplň handly a odkomentuj nové účty. Pak `make check`.
+3. Do `~/stack/promohub/.env` doplň secrets podle `.env.example`: `BLUESKY_MAIN_APP_PASSWORD`, `MASTODON_MAIN_TOKEN`, `YOUTUBE_API_KEY` a pro kanál `TELEGRAM_BOT_TOKEN`.
+4. Před nasazením ověř adaptér lokálně proti živému API (bez DB):
+   ```
+   set -a && . ./.env && set +a && ./bin/promohub probe bluesky:<handle>
+   ```
+   Vypíše namapované snapshoty a zmínky jako JSON. `PROBE_RAW=1` přidá surové odpovědi na stderr; hodí se pro nové fixtures (zkrátit, bez tokenů).
+5. Nasaď: `make deploy`. Migrace `000002` proběhne sama.
+6. Stav účtů: `docker exec promohub /promohub accounts` (nebo lokálně s `DATABASE_URL`).
+   - `ready` — capability je připravená;
+   - `… is not set` — chybí secret. Hub to zkouší znovu jednou za 6 h a nepočítá to jako chybu;
+   - `FAILS` — počet selhání po sobě. Při třetím vznikne trigger `account.error`. Pravidlo v `rules.yaml` je zakomentované; zapni ho, až bude sink `telegram:urgent`.
+
+Intervaly (z `internal/platform`):
+
+| Capability | Interval | Platformy |
+|---|---|---|
+| profil | 3 h | Bluesky, Mastodon, YouTube |
+| profil | 6 h | Telegram, Discord |
+| zmínky | 10 min | Bluesky, Mastodon |
+| zmínky | 15 min | YouTube komentáře |
+| hledání | 30 min | Bluesky search, Mastodon hashtagy |
+
+Chyba se opakuje s backoffem do 6 h, 429 respektuje `Retry-After`.
+
+Ruční přeplánování všeho hned:
+
+```sql
+UPDATE collector_state SET next_run_at = now();
+```

@@ -45,6 +45,17 @@ type App struct {
 	Links       []byte
 }
 
+type CollectorState struct {
+	AccountID  int64
+	Capability string
+	Cursor     []byte
+	NextRunAt  time.Time
+	LastRunAt  *time.Time
+	LastOkAt   *time.Time
+	FailCount  int32
+	LastError  *string
+}
+
 type ContentItem struct {
 	ID             int64
 	AppID          *int64

@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/lioilsources/promohub/internal/platform"
 )
 
 // Env holds process settings. Secrets come only from the environment, never from YAML.
@@ -84,16 +86,65 @@ type App struct {
 	Links       map[string]string `yaml:"links"`
 }
 
-// Account is one of my own promo accounts.
+// Account is one of my own promo accounts. Read and Publish default to the platform registry
+// (internal/platform); validate fills them in.
 type Account struct {
-	Platform   string `yaml:"platform"`
-	Handle     string `yaml:"handle"`
-	ExternalID string `yaml:"external_id"`
-	AuthRef    string `yaml:"auth_ref"`
+	Platform   string            `yaml:"platform"`
+	Handle     string            `yaml:"handle"`
+	ExternalID string            `yaml:"external_id"` // DID, channel ID, page ID, invite code, …
+	AuthRef    string            `yaml:"auth_ref"`    // env prefix of static secrets, or "oauth"
+	Host       string            `yaml:"instance"`    // API host override (Mastodon instance, Bluesky PDS)
+	Lang       string            `yaml:"lang"`        // post language; "any" takes every campaign
+	Apps       []string          `yaml:"apps"`        // app slugs this account promotes; empty = all
+	Read       platform.Via      `yaml:"read"`
+	Publish    platform.Via      `yaml:"publish"`
+	IFTTTEvent string            `yaml:"ifttt_event"` // Webhooks event of the publish applet
+	MaxPerDay  int               `yaml:"max_per_day"`
+	Hashtags   []string          `yaml:"hashtags"` // followed hashtags (Mastodon search)
+	Boards     map[string]string `yaml:"boards"`   // Pinterest: app slug → board
 }
 
 // Key is the "platform:handle" form used to reference an account from a task.
 func (a Account) Key() string { return a.Platform + ":" + a.Handle }
+
+// APIHost is the host the adapter talks to: the instance override, the instance part of a
+// fediverse handle, or the platform default.
+func (a Account) APIHost() string {
+	if a.Host != "" {
+		return strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(a.Host, "https://"), "http://"), "/")
+	}
+	switch a.Platform {
+	case "mastodon":
+		if _, inst, ok := strings.Cut(strings.TrimPrefix(a.Handle, "@"), "@"); ok {
+			return inst
+		}
+	case "bluesky":
+		return "bsky.social"
+	}
+	return ""
+}
+
+// User is the handle without a fediverse instance suffix or leading @.
+func (a Account) User() string {
+	u, _, _ := strings.Cut(strings.TrimPrefix(a.Handle, "@"), "@")
+	return u
+}
+
+// Promotes reports whether a campaign for app slug may go to this account.
+func (a Account) Promotes(slug string) bool {
+	if len(a.Apps) == 0 || slug == "" {
+		return true
+	}
+	for _, s := range a.Apps {
+		if s == slug {
+			return true
+		}
+	}
+	return false
+}
+
+// Speaks reports whether a campaign in lang may go to this account.
+func (a Account) Speaks(lang string) bool { return a.Lang == "any" || lang == "" || a.Lang == lang }
 
 // ApifyTask is a whitelisted Apify task. Webhooks for any other task are rejected.
 type ApifyTask struct {
@@ -188,10 +239,24 @@ func loadYAML(path string, out any, optional bool) error {
 }
 
 func (f *Files) validate() error {
+	slugs := map[string]bool{}
+	for _, a := range f.Apps {
+		if a.Slug == "" || a.Name == "" {
+			return fmt.Errorf("apps.yaml: app needs slug and name")
+		}
+		if slugs[a.Slug] {
+			return fmt.Errorf("apps.yaml: duplicate slug %q", a.Slug)
+		}
+		slugs[a.Slug] = true
+	}
 	accts := map[string]bool{}
-	for _, a := range f.Accounts.Accounts {
-		if a.Platform == "" || a.Handle == "" {
-			return fmt.Errorf("accounts.yaml: account needs platform and handle")
+	for i := range f.Accounts.Accounts {
+		a := &f.Accounts.Accounts[i]
+		if err := a.normalize(slugs); err != nil {
+			return fmt.Errorf("accounts.yaml: %s: %w", a.Key(), err)
+		}
+		if accts[a.Key()] {
+			return fmt.Errorf("accounts.yaml: duplicate account %q", a.Key())
 		}
 		accts[a.Key()] = true
 	}
@@ -207,17 +272,61 @@ func (f *Files) validate() error {
 		}
 		names[t.Name], ids[t.ID] = true, true
 	}
-	slugs := map[string]bool{}
-	for _, a := range f.Apps {
-		if a.Slug == "" || a.Name == "" {
-			return fmt.Errorf("apps.yaml: app needs slug and name")
+	return nil
+}
+
+// normalize checks one account against the platform registry and fills in the defaults.
+func (a *Account) normalize(apps map[string]bool) error {
+	if a.Platform == "" || a.Handle == "" {
+		return fmt.Errorf("account needs platform and handle")
+	}
+	spec, ok := platform.Lookup(a.Platform)
+	if !ok {
+		return fmt.Errorf("unknown platform %q", a.Platform)
+	}
+	if a.Platform == "mastodon" && a.APIHost() == "" {
+		return fmt.Errorf("handle must be %s", spec.HandleHelp)
+	}
+	if a.Read == "" {
+		a.Read = spec.Read
+	}
+	if a.Publish == "" {
+		a.Publish = spec.Publish
+	}
+	if !platform.Allows(spec.ReadVias, a.Read) {
+		return fmt.Errorf("read: %q is not one of %v", a.Read, spec.ReadVias)
+	}
+	if !platform.Allows(spec.PubVias, a.Publish) {
+		return fmt.Errorf("publish: %q is not one of %v", a.Publish, spec.PubVias)
+	}
+	if a.Publish == platform.ViaIFTTT && a.IFTTTEvent == "" {
+		a.IFTTTEvent = "publish_" + a.Platform
+	}
+	if a.Lang == "" {
+		a.Lang = "en"
+	}
+	for _, s := range a.Apps {
+		if !apps[s] {
+			return fmt.Errorf("apps: unknown app %q", s)
 		}
-		if slugs[a.Slug] {
-			return fmt.Errorf("apps.yaml: duplicate slug %q", a.Slug)
+	}
+	for s := range a.Boards {
+		if !apps[s] {
+			return fmt.Errorf("boards: unknown app %q", s)
 		}
-		slugs[a.Slug] = true
 	}
 	return nil
+}
+
+// AccountsOn returns my accounts on one platform.
+func (f *Files) AccountsOn(name string) []Account {
+	var out []Account
+	for _, a := range f.Accounts.Accounts {
+		if a.Platform == name {
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 // TaskByID returns the whitelisted task with this Apify ID.

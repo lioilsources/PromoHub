@@ -59,6 +59,65 @@ func (q *Queries) ApifySpendSince(ctx context.Context, receivedAt time.Time) (Ap
 	return i, err
 }
 
+const collectorFailed = `-- name: CollectorFailed :one
+UPDATE collector_state
+SET next_run_at = $1, last_run_at = $2, last_error = $3,
+    fail_count = fail_count + CASE WHEN $4::boolean THEN 1 ELSE 0 END
+WHERE account_id = $5 AND capability = $6
+RETURNING fail_count
+`
+
+type CollectorFailedParams struct {
+	NextRunAt  time.Time
+	RanAt      *time.Time
+	LastError  *string
+	Counts     bool
+	AccountID  int64
+	Capability string
+}
+
+// counts=false records the error without counting a failure (secret not set yet).
+func (q *Queries) CollectorFailed(ctx context.Context, arg CollectorFailedParams) (int32, error) {
+	row := q.db.QueryRow(ctx, collectorFailed,
+		arg.NextRunAt,
+		arg.RanAt,
+		arg.LastError,
+		arg.Counts,
+		arg.AccountID,
+		arg.Capability,
+	)
+	var fail_count int32
+	err := row.Scan(&fail_count)
+	return fail_count, err
+}
+
+const collectorOK = `-- name: CollectorOK :exec
+UPDATE collector_state
+SET cursor = COALESCE($1::jsonb, cursor), next_run_at = $2,
+    last_run_at = $3, last_ok_at = $3, fail_count = 0, last_error = NULL
+WHERE account_id = $4 AND capability = $5
+`
+
+type CollectorOKParams struct {
+	Cursor     []byte
+	NextRunAt  time.Time
+	RanAt      *time.Time
+	AccountID  int64
+	Capability string
+}
+
+// A NULL cursor keeps the previous one.
+func (q *Queries) CollectorOK(ctx context.Context, arg CollectorOKParams) error {
+	_, err := q.db.Exec(ctx, collectorOK,
+		arg.Cursor,
+		arg.NextRunAt,
+		arg.RanAt,
+		arg.AccountID,
+		arg.Capability,
+	)
+	return err
+}
+
 const contentSnapshotAtOrBefore = `-- name: ContentSnapshotAtOrBefore :one
 SELECT id, content_item_id, account_id, platform, taken_at, likes, views, reposts, comments, followers, extra, source_run_id FROM metric_snapshots
 WHERE content_item_id = $1 AND taken_at <= $2
@@ -89,6 +148,42 @@ func (q *Queries) ContentSnapshotAtOrBefore(ctx context.Context, arg ContentSnap
 		&i.SourceRunID,
 	)
 	return i, err
+}
+
+const dueCollectorStates = `-- name: DueCollectorStates :many
+SELECT account_id, capability, cursor, next_run_at, last_run_at, last_ok_at, fail_count, last_error FROM collector_state
+WHERE next_run_at <= $1::timestamptz
+ORDER BY next_run_at
+LIMIT 50
+`
+
+func (q *Queries) DueCollectorStates(ctx context.Context, now time.Time) ([]CollectorState, error) {
+	rows, err := q.db.Query(ctx, dueCollectorStates, now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CollectorState{}
+	for rows.Next() {
+		var i CollectorState
+		if err := rows.Scan(
+			&i.AccountID,
+			&i.Capability,
+			&i.Cursor,
+			&i.NextRunAt,
+			&i.LastRunAt,
+			&i.LastOkAt,
+			&i.FailCount,
+			&i.LastError,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const earliestAccountSnapshot = `-- name: EarliestAccountSnapshot :one
@@ -143,6 +238,21 @@ func (q *Queries) EarliestContentSnapshot(ctx context.Context, contentItemID *in
 		&i.SourceRunID,
 	)
 	return i, err
+}
+
+const ensureCollectorState = `-- name: EnsureCollectorState :exec
+INSERT INTO collector_state (account_id, capability) VALUES ($1, $2)
+ON CONFLICT DO NOTHING
+`
+
+type EnsureCollectorStateParams struct {
+	AccountID  int64
+	Capability string
+}
+
+func (q *Queries) EnsureCollectorState(ctx context.Context, arg EnsureCollectorStateParams) error {
+	_, err := q.db.Exec(ctx, ensureCollectorState, arg.AccountID, arg.Capability)
+	return err
 }
 
 const getApifyRun = `-- name: GetApifyRun :one
@@ -378,6 +488,69 @@ func (q *Queries) LatestContentSnapshot(ctx context.Context, contentItemID *int6
 	return i, err
 }
 
+const listAccounts = `-- name: ListAccounts :many
+SELECT id, platform, handle, external_id, auth_ref FROM accounts ORDER BY id
+`
+
+func (q *Queries) ListAccounts(ctx context.Context) ([]Account, error) {
+	rows, err := q.db.Query(ctx, listAccounts)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Account{}
+	for rows.Next() {
+		var i Account
+		if err := rows.Scan(
+			&i.ID,
+			&i.Platform,
+			&i.Handle,
+			&i.ExternalID,
+			&i.AuthRef,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCollectorStates = `-- name: ListCollectorStates :many
+SELECT account_id, capability, cursor, next_run_at, last_run_at, last_ok_at, fail_count, last_error FROM collector_state ORDER BY account_id, capability
+`
+
+func (q *Queries) ListCollectorStates(ctx context.Context) ([]CollectorState, error) {
+	rows, err := q.db.Query(ctx, listCollectorStates)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CollectorState{}
+	for rows.Next() {
+		var i CollectorState
+		if err := rows.Scan(
+			&i.AccountID,
+			&i.Capability,
+			&i.Cursor,
+			&i.NextRunAt,
+			&i.LastRunAt,
+			&i.LastOkAt,
+			&i.FailCount,
+			&i.LastError,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markApifyRunFailed = `-- name: MarkApifyRunFailed :exec
 UPDATE apify_runs SET state = 'failed', attempts = attempts + 1, last_error = $2, next_attempt_at = $3 WHERE run_id = $1
 `
@@ -491,6 +664,21 @@ func (q *Queries) PendingEvents(ctx context.Context, arg PendingEventsParams) ([
 		return nil, err
 	}
 	return items, nil
+}
+
+const postponeCollector = `-- name: PostponeCollector :exec
+UPDATE collector_state SET next_run_at = $3 WHERE account_id = $1 AND capability = $2
+`
+
+type PostponeCollectorParams struct {
+	AccountID  int64
+	Capability string
+	NextRunAt  time.Time
+}
+
+func (q *Queries) PostponeCollector(ctx context.Context, arg PostponeCollectorParams) error {
+	_, err := q.db.Exec(ctx, postponeCollector, arg.AccountID, arg.Capability, arg.NextRunAt)
+	return err
 }
 
 const retryableApifyRuns = `-- name: RetryableApifyRuns :many
