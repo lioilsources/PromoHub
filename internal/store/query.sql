@@ -161,3 +161,125 @@ SELECT * FROM collector_state ORDER BY account_id, capability;
 
 -- name: ListAccounts :many
 SELECT * FROM accounts ORDER BY id;
+
+-- name: InsertCampaign :one
+INSERT INTO campaigns (app_id, source_content_item_id, lang, title, body, link, media)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING *;
+
+-- name: GetCampaign :one
+SELECT * FROM campaigns WHERE id = $1;
+
+-- name: SetCampaignMessage :exec
+UPDATE campaigns SET tg_chat_id = $2, tg_message_id = $3 WHERE id = $1;
+
+-- name: InsertDraft :one
+INSERT INTO drafts (campaign_id, account_id, via, text, extra)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (campaign_id, account_id) DO NOTHING
+RETURNING *;
+
+-- name: GetDraft :one
+SELECT * FROM drafts WHERE id = $1;
+
+-- name: CampaignDrafts :many
+SELECT * FROM drafts WHERE campaign_id = $1 ORDER BY id;
+
+-- name: SetDraftMessage :exec
+UPDATE drafts SET tg_chat_id = $2, tg_message_id = $3 WHERE id = $1;
+
+-- name: SetDraftText :one
+-- Editing is allowed until the draft is handed to the publisher.
+UPDATE drafts SET text = $2, extra = $3, updated_at = now()
+WHERE id = $1 AND status IN ('draft', 'approved', 'failed')
+RETURNING *;
+
+-- name: ApproveDraft :one
+UPDATE drafts SET status = 'approved', approved_at = sqlc.arg(now)::timestamptz, scheduled_at = sqlc.narg(scheduled_at), error = NULL, updated_at = now()
+WHERE id = sqlc.arg(id) AND status IN ('draft', 'failed', 'approved')
+RETURNING *;
+
+-- name: SkipDraft :one
+UPDATE drafts SET status = 'skipped', updated_at = now()
+WHERE id = $1 AND status IN ('draft', 'approved', 'failed', 'unknown')
+RETURNING *;
+
+-- name: ApprovedSince :one
+-- Drafts of an account approved or published in the window, for max_per_day.
+SELECT count(*)::bigint FROM drafts
+WHERE account_id = $1 AND id <> $2 AND status IN ('approved', 'publishing', 'published', 'sent', 'unknown')
+  AND approved_at >= $3;
+
+-- name: ClaimDueDraft :one
+-- Hands one due draft to the publisher. The attempt key survives automatic retries so APIs
+-- that dedup on it (Mastodon Idempotency-Key) see the same key.
+UPDATE drafts SET status = 'publishing', attempts = attempts + 1, attempt_key = COALESCE(attempt_key, sqlc.arg(attempt_key)), updated_at = now()
+WHERE id = (
+    SELECT d.id FROM drafts d
+    WHERE d.status = 'approved' AND (d.scheduled_at IS NULL OR d.scheduled_at <= sqlc.arg(now)::timestamptz)
+    ORDER BY COALESCE(d.scheduled_at, d.approved_at), d.id
+    FOR UPDATE SKIP LOCKED
+    LIMIT 1
+)
+RETURNING *;
+
+-- name: FinishDraft :one
+UPDATE drafts
+SET status = sqlc.arg(status), published_at = sqlc.narg(published_at), published_external_id = sqlc.narg(external_id),
+    published_url = sqlc.narg(url), content_item_id = COALESCE(sqlc.narg(content_item_id), content_item_id),
+    error = sqlc.narg(error), updated_at = now(),
+    -- a failed attempt posted nothing, so the next one must not be deduplicated against it
+    attempt_key = CASE WHEN sqlc.arg(status) = 'failed' THEN NULL ELSE attempt_key END
+WHERE id = sqlc.arg(id) AND status = 'publishing'
+RETURNING *;
+
+-- name: RetryDraft :one
+UPDATE drafts SET status = 'approved', updated_at = now() WHERE id = $1 AND status = 'publishing' RETURNING *;
+
+-- name: StrandedDrafts :many
+-- Drafts left in publishing by a crash: the post may or may not exist.
+UPDATE drafts SET status = 'unknown', error = 'hub restarted while publishing', updated_at = now()
+WHERE status = 'publishing'
+RETURNING *;
+
+-- name: MarkDraftPublished :one
+-- Olin confirmed a sent/unknown draft with its URL, or the next collect matched it.
+UPDATE drafts SET status = 'published', published_url = COALESCE(sqlc.narg(url), published_url),
+    published_external_id = COALESCE(sqlc.narg(external_id), published_external_id),
+    content_item_id = COALESCE(sqlc.narg(content_item_id), content_item_id),
+    published_at = COALESCE(published_at, now()), error = NULL, updated_at = now()
+WHERE id = sqlc.arg(id) AND status IN ('sent', 'unknown', 'published')
+RETURNING *;
+
+-- name: RequeueUnknownDraft :one
+UPDATE drafts SET status = 'approved', error = NULL, updated_at = now() WHERE id = $1 AND status = 'unknown' RETURNING *;
+
+-- name: SentDraftsForAccount :many
+SELECT * FROM drafts WHERE account_id = $1 AND status = 'sent' AND published_at >= $2 ORDER BY published_at;
+
+-- name: InsertMediaAsset :one
+INSERT INTO media_assets (token, path, name, mime, bytes, sha256, width, height, duration_ms, alt, expires_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+RETURNING *;
+
+-- name: GetMediaAsset :one
+SELECT * FROM media_assets WHERE id = $1;
+
+-- name: MediaByToken :one
+SELECT * FROM media_assets WHERE token = $1 AND expires_at > $2;
+
+-- name: ExtendMedia :exec
+UPDATE media_assets SET expires_at = GREATEST(expires_at, $2) WHERE id = $1;
+
+-- name: GetKV :one
+SELECT value FROM kv WHERE key = $1;
+
+-- name: SetKV :exec
+INSERT INTO kv (key, value) VALUES ($1, $2)
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
+
+-- name: DeleteKV :exec
+DELETE FROM kv WHERE key = $1;
+
+-- name: GetAccount :one
+SELECT * FROM accounts WHERE id = $1;

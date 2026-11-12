@@ -180,7 +180,7 @@ Hub teď sám čte Bluesky, Mastodon, YouTube, Telegram kanál a Discord. Apify 
    ```
    Vypíše namapované snapshoty a zmínky jako JSON. `PROBE_RAW=1` přidá surové odpovědi na stderr; hodí se pro nové fixtures (zkrátit, bez tokenů).
 5. Nasaď: `make deploy`. Migrace `000002` proběhne sama.
-6. Stav účtů: `docker exec promohub /promohub accounts` (nebo lokálně s `DATABASE_URL`).
+6. Stav účtů: `docker exec promohub promohub accounts` (nebo lokálně s `DATABASE_URL`).
    - `ready` — capability je připravená;
    - `… is not set` — chybí secret. Hub to zkouší znovu jednou za 6 h a nepočítá to jako chybu;
    - `FAILS` — počet selhání po sobě. Při třetím vznikne trigger `account.error`. Pravidlo v `rules.yaml` je zakomentované; zapni ho, až bude sink `telegram:urgent`.
@@ -201,4 +201,65 @@ Ruční přeplánování všeho hned:
 
 ```sql
 UPDATE collector_state SET next_run_at = now();
+```
+
+---
+
+## 7. Vlna 2 — publikace se schválením v Telegramu
+
+Nic se nepublikuje bez tvého ✅ v Telegramu. Bez `TELEGRAM_ADMIN_IDS` je publikace vypnutá úplně.
+
+### Nastavení
+
+1. **Vlastní bot.** U @BotFather založ nového bota jen pro promohub. Hub čte zprávy přes `getUpdates` a druhý proces se stejným tokenem by mu je bral.
+   - Token dej do `TELEGRAM_BOT_TOKEN`.
+   - Do `TELEGRAM_ADMIN_IDS` dej svoje user ID: pošli `/start` botovi @userinfobot.
+   - Botovi pošli `/start`, ať ti smí psát.
+2. **Telegram kanál** (volitelný): bota přidej jako admina kanálu (prompt 6 v `Prompts/02-CHROME_PROMPTS.md`). Do `accounts.yaml` přidej `platform: telegram`.
+3. **Discord**: `DISCORD_ANNOUNCE_WEBHOOK` a účet `platform: discord` s `auth_ref: DISCORD_ANNOUNCE`.
+4. **IFTTT applety** `publish_x`, `publish_facebook`, `publish_linkedin`, `publish_pinterest`, `publish_threads` podle promptu 3.
+   - Trigger je „Receive a web request“, pole Value1 = text, Value2 = odkaz, Value3 = obrázek.
+   - Bez `IFTTT_KEY` dostanou tyhle účty ruční kartu.
+5. **Mastodon token** musí mít `write:statuses` a `write:media`.
+6. **Caddy**: nový `deploy/Caddyfile.snippet` zveřejňuje `/media/*` a `/oauth/*` a v logu maže tokeny médií. Potřebuje Caddy ≥ 2.8; `caddy reload` konfiguraci ověří a chybnou odmítne.
+7. **Compose**: přibyl volume `promohub-media` (`/data/media`).
+8. **LLM** (volitelné): `LLM_BASE_URL` (OpenAI-kompatibilní, …/v1), `LLM_MODEL`, `LLM_API_KEY`. Styl se bere z `voice.md`. Bez nich hub texty jen ořízne na limity, přidá odkaz a hashtagy.
+   - Jak hub dostane kapacitu na SPARKu, je otevřená otázka §13/8 plánu.
+
+### Použití
+
+Kampaň vytvoříš zprávou botovi:
+
+```
+/post swypekids SwypeKids 2.0 je venku
+Offline režim a nová hra. https://olin.now/swypekids
+```
+
+- **Syntaxe**: `/post [slug appky] [cs|en] [media=ID] text… [odkaz]`. Poslední URL v textu je odkaz kampaně; je-li text víceřádkový, první řádek je titulek (Reddit, HN, YouTube).
+- **Médium**: fotku pošli s popiskem `/post …`. Soubor nad 20 MB nahraj přes `make media FILE=clip.mp4` a do `/post` přidej `media=ID`.
+- **Komu draft vznikne**: každému účtu s `publish` ≠ `none`, jehož `apps` a `lang` sedí. Účet bez funkční cesty (chybí publisher nebo `IFTTT_KEY`) dostane ruční kartu s poznámkou proč.
+- **Tlačítka na kartě**: ✅ schválit · ✏️ upravit (odpověz novým textem) · 🕒 naplánovat (`18:30`, `zítra 9:00`, `2026-11-20 10:00`, `+2h`, vše pražský čas) · ⏭ přeskočit. Na hlavičce kampaně je „Schválit vše“.
+- **Kontroly při schválení**: délka v jednotkách platformy (Bluesky grafémy, X vážené znaky), `max_per_day` účtu a u Pinterestu obrázek.
+
+Co se pak stane podle cesty:
+
+| Cesta | Výsledek |
+|---|---|
+| `api` | Post vyjde a karta ukáže URL. |
+| `ifttt` | Stav `sent`. Hub post spáruje podle textu, až ho najde collector nebo Apify (do 48 h). U účtů s Apify profilem pustí task za 10 min. |
+| `manual` | Přijde karta s textem ke zkopírování a tlačítkem pro otevření editoru platformy. Po zveřejnění dej „Vyšlo, pošlu URL“ a odpověz URL; hub začne post sledovat. |
+
+Nové video na YouTube (IFTTT `youtube_new_video` nebo collector, video mladší 48 h) samo navrhne kampaň na ostatní účty.
+
+### Když se něco pokazí
+
+- **Hub spadl během publikace**: draft přejde do `unknown` a bot se zeptá „Vyšlo to?“. Hub ho nikdy sám neopakuje, protože by mohl vzniknout dvojí post.
+  - Výjimka je Mastodon: tam je bezpečný retry se stejným `Idempotency-Key`, až 3×.
+- **Odmítnuto platformou** (4xx, chybné médium, špatné heslo): `failed`. Oprav příčinu a schval znovu.
+
+Stav draftů:
+
+```sql
+SELECT d.id, a.platform, a.handle, d.via, d.status, d.error, d.published_url
+FROM drafts d JOIN accounts a ON a.id = d.account_id ORDER BY d.id DESC LIMIT 20;
 ```

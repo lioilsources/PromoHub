@@ -6,6 +6,7 @@ require (
 	github.com/apify/apify-client-go v0.13.1
 	github.com/golang-migrate/migrate/v4 v4.20.1
 	github.com/jackc/pgx/v5 v5.11.0
+	github.com/rivo/uniseg v0.4.7
 	gopkg.in/yaml.v3 v3.0.1
 )
 

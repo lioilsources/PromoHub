@@ -6,7 +6,7 @@ STACK   ?= stack
 TEST_PG_PORT ?= 55432
 TEST_PG ?= postgres://promohub:promohub@127.0.0.1:$(TEST_PG_PORT)/promohub?sslmode=disable
 
-.PHONY: build test test-db vet generate check run docker push deploy deploy-config pg-up pg-down
+.PHONY: build test test-db vet generate check run docker push deploy deploy-config pg-up pg-down media
 
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=$(VERSION)" -o bin/promohub ./cmd/promohub
@@ -51,7 +51,12 @@ push: docker
 # Copy config to JODA (secrets in .env are managed there by hand).
 deploy-config: check
 	ssh $(JODA) 'mkdir -p ~/$(STACK)/promohub/config'
-	scp apps.yaml accounts.yaml rules.yaml $(JODA):$(STACK)/promohub/config/
+	scp apps.yaml accounts.yaml rules.yaml voice.md $(JODA):$(STACK)/promohub/config/
 
 deploy: push deploy-config
 	ssh $(JODA) 'cd ~/$(STACK) && docker compose pull promohub && docker compose up -d promohub'
+
+# Upload a file too big for Telegram (20 MB) to the hub on JODA; prints media=ID for /post.
+media:
+	@test -n "$(FILE)" || (echo "usage: make media FILE=path/to/clip.mp4 [ALT='…']"; exit 1)
+	ssh $(JODA) "docker exec -i promohub promohub media import --name '$(notdir $(FILE))' --alt '$(ALT)'" < "$(FILE)"

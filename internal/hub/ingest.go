@@ -26,6 +26,14 @@ type IngestResult struct {
 	NewContent   int
 	NewSnapshots int
 	Events       int
+	Matched      []int64     // sent drafts this batch confirmed as published
+	Fresh        []freshPost // new videos of mine that may deserve a campaign
+}
+
+type freshPost struct {
+	contentID       int64
+	platform, title string
+	url             string
 }
 
 // Ingest stores a batch and queues the events its rules fire. Everything runs on q, which the
@@ -59,6 +67,16 @@ func (h *Hub) Ingest(ctx context.Context, q *db.Queries, src Source, b collector
 			title = firstLine(s.Content.Title, s.Content.Body)
 			if row.Inserted {
 				res.NewContent++
+				if hasAcct {
+					m, err := h.matchSent(ctx, q, acctID, row.ID, &contentRef{s.Content.ExternalID, s.Content.URL, s.Content.Body}, takenAt)
+					if err != nil {
+						return res, fmt.Errorf("match sent drafts: %w", err)
+					}
+					res.Matched = append(res.Matched, m...)
+				}
+				if s.Platform == "youtube" && s.Content.PublishedAt != nil && takenAt.Sub(*s.Content.PublishedAt) < freshContent {
+					res.Fresh = append(res.Fresh, freshPost{row.ID, s.Platform, firstLine(s.Content.Title, s.Content.Body), s.Content.URL})
+				}
 				n, err := h.fire(ctx, q, rules.OnContentNew, contentVars(s), map[string]any{
 					"platform": s.Platform, "url": s.Content.URL, "title": title,
 				})
@@ -234,6 +252,10 @@ func message(on string, p map[string]any) string {
 			fmt.Fprintf(&b, " · %s", a)
 		}
 		fmt.Fprintf(&b, "\n%s", truncate(s("text"), 600))
+	case on == rules.OnPublishDone:
+		fmt.Fprintf(&b, "[%s] published (%s) %s", s("platform"), s("via"), s("account"))
+	case on == rules.OnPublishFailed:
+		fmt.Fprintf(&b, "[%s] publish %s %s: %s", s("platform"), s("status"), s("account"), truncate(s("error"), 300))
 	case on == rules.OnAccountError:
 		fmt.Fprintf(&b, "[%s] %s %s failing: %s", s("platform"), s("account"), s("capability"), truncate(s("error"), 300))
 	case on == rules.OnContentNew:

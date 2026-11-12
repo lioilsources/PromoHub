@@ -59,6 +59,155 @@ func (q *Queries) ApifySpendSince(ctx context.Context, receivedAt time.Time) (Ap
 	return i, err
 }
 
+const approveDraft = `-- name: ApproveDraft :one
+UPDATE drafts SET status = 'approved', approved_at = $1::timestamptz, scheduled_at = $2, error = NULL, updated_at = now()
+WHERE id = $3 AND status IN ('draft', 'failed', 'approved')
+RETURNING id, campaign_id, account_id, via, text, extra, status, scheduled_at, approved_at, attempt_key, attempts, published_at, published_external_id, published_url, content_item_id, error, tg_chat_id, tg_message_id, updated_at
+`
+
+type ApproveDraftParams struct {
+	Now         time.Time
+	ScheduledAt *time.Time
+	ID          int64
+}
+
+func (q *Queries) ApproveDraft(ctx context.Context, arg ApproveDraftParams) (Draft, error) {
+	row := q.db.QueryRow(ctx, approveDraft, arg.Now, arg.ScheduledAt, arg.ID)
+	var i Draft
+	err := row.Scan(
+		&i.ID,
+		&i.CampaignID,
+		&i.AccountID,
+		&i.Via,
+		&i.Text,
+		&i.Extra,
+		&i.Status,
+		&i.ScheduledAt,
+		&i.ApprovedAt,
+		&i.AttemptKey,
+		&i.Attempts,
+		&i.PublishedAt,
+		&i.PublishedExternalID,
+		&i.PublishedUrl,
+		&i.ContentItemID,
+		&i.Error,
+		&i.TgChatID,
+		&i.TgMessageID,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const approvedSince = `-- name: ApprovedSince :one
+SELECT count(*)::bigint FROM drafts
+WHERE account_id = $1 AND id <> $2 AND status IN ('approved', 'publishing', 'published', 'sent', 'unknown')
+  AND approved_at >= $3
+`
+
+type ApprovedSinceParams struct {
+	AccountID  int64
+	ID         int64
+	ApprovedAt *time.Time
+}
+
+// Drafts of an account approved or published in the window, for max_per_day.
+func (q *Queries) ApprovedSince(ctx context.Context, arg ApprovedSinceParams) (int64, error) {
+	row := q.db.QueryRow(ctx, approvedSince, arg.AccountID, arg.ID, arg.ApprovedAt)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const campaignDrafts = `-- name: CampaignDrafts :many
+SELECT id, campaign_id, account_id, via, text, extra, status, scheduled_at, approved_at, attempt_key, attempts, published_at, published_external_id, published_url, content_item_id, error, tg_chat_id, tg_message_id, updated_at FROM drafts WHERE campaign_id = $1 ORDER BY id
+`
+
+func (q *Queries) CampaignDrafts(ctx context.Context, campaignID int64) ([]Draft, error) {
+	rows, err := q.db.Query(ctx, campaignDrafts, campaignID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Draft{}
+	for rows.Next() {
+		var i Draft
+		if err := rows.Scan(
+			&i.ID,
+			&i.CampaignID,
+			&i.AccountID,
+			&i.Via,
+			&i.Text,
+			&i.Extra,
+			&i.Status,
+			&i.ScheduledAt,
+			&i.ApprovedAt,
+			&i.AttemptKey,
+			&i.Attempts,
+			&i.PublishedAt,
+			&i.PublishedExternalID,
+			&i.PublishedUrl,
+			&i.ContentItemID,
+			&i.Error,
+			&i.TgChatID,
+			&i.TgMessageID,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const claimDueDraft = `-- name: ClaimDueDraft :one
+UPDATE drafts SET status = 'publishing', attempts = attempts + 1, attempt_key = COALESCE(attempt_key, $1), updated_at = now()
+WHERE id = (
+    SELECT d.id FROM drafts d
+    WHERE d.status = 'approved' AND (d.scheduled_at IS NULL OR d.scheduled_at <= $2::timestamptz)
+    ORDER BY COALESCE(d.scheduled_at, d.approved_at), d.id
+    FOR UPDATE SKIP LOCKED
+    LIMIT 1
+)
+RETURNING id, campaign_id, account_id, via, text, extra, status, scheduled_at, approved_at, attempt_key, attempts, published_at, published_external_id, published_url, content_item_id, error, tg_chat_id, tg_message_id, updated_at
+`
+
+type ClaimDueDraftParams struct {
+	AttemptKey *string
+	Now        time.Time
+}
+
+// Hands one due draft to the publisher. The attempt key survives automatic retries so APIs
+// that dedup on it (Mastodon Idempotency-Key) see the same key.
+func (q *Queries) ClaimDueDraft(ctx context.Context, arg ClaimDueDraftParams) (Draft, error) {
+	row := q.db.QueryRow(ctx, claimDueDraft, arg.AttemptKey, arg.Now)
+	var i Draft
+	err := row.Scan(
+		&i.ID,
+		&i.CampaignID,
+		&i.AccountID,
+		&i.Via,
+		&i.Text,
+		&i.Extra,
+		&i.Status,
+		&i.ScheduledAt,
+		&i.ApprovedAt,
+		&i.AttemptKey,
+		&i.Attempts,
+		&i.PublishedAt,
+		&i.PublishedExternalID,
+		&i.PublishedUrl,
+		&i.ContentItemID,
+		&i.Error,
+		&i.TgChatID,
+		&i.TgMessageID,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const collectorFailed = `-- name: CollectorFailed :one
 UPDATE collector_state
 SET next_run_at = $1, last_run_at = $2, last_error = $3,
@@ -148,6 +297,15 @@ func (q *Queries) ContentSnapshotAtOrBefore(ctx context.Context, arg ContentSnap
 		&i.SourceRunID,
 	)
 	return i, err
+}
+
+const deleteKV = `-- name: DeleteKV :exec
+DELETE FROM kv WHERE key = $1
+`
+
+func (q *Queries) DeleteKV(ctx context.Context, key string) error {
+	_, err := q.db.Exec(ctx, deleteKV, key)
+	return err
 }
 
 const dueCollectorStates = `-- name: DueCollectorStates :many
@@ -255,6 +413,93 @@ func (q *Queries) EnsureCollectorState(ctx context.Context, arg EnsureCollectorS
 	return err
 }
 
+const extendMedia = `-- name: ExtendMedia :exec
+UPDATE media_assets SET expires_at = GREATEST(expires_at, $2) WHERE id = $1
+`
+
+type ExtendMediaParams struct {
+	ID        int64
+	ExpiresAt time.Time
+}
+
+func (q *Queries) ExtendMedia(ctx context.Context, arg ExtendMediaParams) error {
+	_, err := q.db.Exec(ctx, extendMedia, arg.ID, arg.ExpiresAt)
+	return err
+}
+
+const finishDraft = `-- name: FinishDraft :one
+UPDATE drafts
+SET status = $1, published_at = $2, published_external_id = $3,
+    published_url = $4, content_item_id = COALESCE($5, content_item_id),
+    error = $6, updated_at = now(),
+    -- a failed attempt posted nothing, so the next one must not be deduplicated against it
+    attempt_key = CASE WHEN $1 = 'failed' THEN NULL ELSE attempt_key END
+WHERE id = $7 AND status = 'publishing'
+RETURNING id, campaign_id, account_id, via, text, extra, status, scheduled_at, approved_at, attempt_key, attempts, published_at, published_external_id, published_url, content_item_id, error, tg_chat_id, tg_message_id, updated_at
+`
+
+type FinishDraftParams struct {
+	Status        string
+	PublishedAt   *time.Time
+	ExternalID    *string
+	Url           *string
+	ContentItemID *int64
+	Error         *string
+	ID            int64
+}
+
+func (q *Queries) FinishDraft(ctx context.Context, arg FinishDraftParams) (Draft, error) {
+	row := q.db.QueryRow(ctx, finishDraft,
+		arg.Status,
+		arg.PublishedAt,
+		arg.ExternalID,
+		arg.Url,
+		arg.ContentItemID,
+		arg.Error,
+		arg.ID,
+	)
+	var i Draft
+	err := row.Scan(
+		&i.ID,
+		&i.CampaignID,
+		&i.AccountID,
+		&i.Via,
+		&i.Text,
+		&i.Extra,
+		&i.Status,
+		&i.ScheduledAt,
+		&i.ApprovedAt,
+		&i.AttemptKey,
+		&i.Attempts,
+		&i.PublishedAt,
+		&i.PublishedExternalID,
+		&i.PublishedUrl,
+		&i.ContentItemID,
+		&i.Error,
+		&i.TgChatID,
+		&i.TgMessageID,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getAccount = `-- name: GetAccount :one
+SELECT id, platform, handle, external_id, auth_ref FROM accounts WHERE id = $1
+`
+
+func (q *Queries) GetAccount(ctx context.Context, id int64) (Account, error) {
+	row := q.db.QueryRow(ctx, getAccount, id)
+	var i Account
+	err := row.Scan(
+		&i.ID,
+		&i.Platform,
+		&i.Handle,
+		&i.ExternalID,
+		&i.AuthRef,
+	)
+	return i, err
+}
+
 const getApifyRun = `-- name: GetApifyRun :one
 SELECT run_id, task_id, task_name, actor_id, dataset_id, status, state, attempts, last_error, next_attempt_at, started_at, finished_at, items, new_items, cost_usd, received_at, processed_at FROM apify_runs WHERE run_id = $1
 `
@@ -280,6 +525,97 @@ func (q *Queries) GetApifyRun(ctx context.Context, runID string) (ApifyRun, erro
 		&i.CostUsd,
 		&i.ReceivedAt,
 		&i.ProcessedAt,
+	)
+	return i, err
+}
+
+const getCampaign = `-- name: GetCampaign :one
+SELECT id, app_id, source_content_item_id, lang, title, body, link, media, status, tg_chat_id, tg_message_id, created_at FROM campaigns WHERE id = $1
+`
+
+func (q *Queries) GetCampaign(ctx context.Context, id int64) (Campaign, error) {
+	row := q.db.QueryRow(ctx, getCampaign, id)
+	var i Campaign
+	err := row.Scan(
+		&i.ID,
+		&i.AppID,
+		&i.SourceContentItemID,
+		&i.Lang,
+		&i.Title,
+		&i.Body,
+		&i.Link,
+		&i.Media,
+		&i.Status,
+		&i.TgChatID,
+		&i.TgMessageID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getDraft = `-- name: GetDraft :one
+SELECT id, campaign_id, account_id, via, text, extra, status, scheduled_at, approved_at, attempt_key, attempts, published_at, published_external_id, published_url, content_item_id, error, tg_chat_id, tg_message_id, updated_at FROM drafts WHERE id = $1
+`
+
+func (q *Queries) GetDraft(ctx context.Context, id int64) (Draft, error) {
+	row := q.db.QueryRow(ctx, getDraft, id)
+	var i Draft
+	err := row.Scan(
+		&i.ID,
+		&i.CampaignID,
+		&i.AccountID,
+		&i.Via,
+		&i.Text,
+		&i.Extra,
+		&i.Status,
+		&i.ScheduledAt,
+		&i.ApprovedAt,
+		&i.AttemptKey,
+		&i.Attempts,
+		&i.PublishedAt,
+		&i.PublishedExternalID,
+		&i.PublishedUrl,
+		&i.ContentItemID,
+		&i.Error,
+		&i.TgChatID,
+		&i.TgMessageID,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getKV = `-- name: GetKV :one
+SELECT value FROM kv WHERE key = $1
+`
+
+func (q *Queries) GetKV(ctx context.Context, key string) (string, error) {
+	row := q.db.QueryRow(ctx, getKV, key)
+	var value string
+	err := row.Scan(&value)
+	return value, err
+}
+
+const getMediaAsset = `-- name: GetMediaAsset :one
+SELECT id, token, path, name, mime, bytes, sha256, width, height, duration_ms, alt, created_at, expires_at FROM media_assets WHERE id = $1
+`
+
+func (q *Queries) GetMediaAsset(ctx context.Context, id int64) (MediaAsset, error) {
+	row := q.db.QueryRow(ctx, getMediaAsset, id)
+	var i MediaAsset
+	err := row.Scan(
+		&i.ID,
+		&i.Token,
+		&i.Path,
+		&i.Name,
+		&i.Mime,
+		&i.Bytes,
+		&i.Sha256,
+		&i.Width,
+		&i.Height,
+		&i.DurationMs,
+		&i.Alt,
+		&i.CreatedAt,
+		&i.ExpiresAt,
 	)
 	return i, err
 }
@@ -327,6 +663,98 @@ func (q *Queries) InsertApifyRun(ctx context.Context, arg InsertApifyRunParams) 
 	var run_id string
 	err := row.Scan(&run_id)
 	return run_id, err
+}
+
+const insertCampaign = `-- name: InsertCampaign :one
+INSERT INTO campaigns (app_id, source_content_item_id, lang, title, body, link, media)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, app_id, source_content_item_id, lang, title, body, link, media, status, tg_chat_id, tg_message_id, created_at
+`
+
+type InsertCampaignParams struct {
+	AppID               *int64
+	SourceContentItemID *int64
+	Lang                string
+	Title               *string
+	Body                string
+	Link                *string
+	Media               []byte
+}
+
+func (q *Queries) InsertCampaign(ctx context.Context, arg InsertCampaignParams) (Campaign, error) {
+	row := q.db.QueryRow(ctx, insertCampaign,
+		arg.AppID,
+		arg.SourceContentItemID,
+		arg.Lang,
+		arg.Title,
+		arg.Body,
+		arg.Link,
+		arg.Media,
+	)
+	var i Campaign
+	err := row.Scan(
+		&i.ID,
+		&i.AppID,
+		&i.SourceContentItemID,
+		&i.Lang,
+		&i.Title,
+		&i.Body,
+		&i.Link,
+		&i.Media,
+		&i.Status,
+		&i.TgChatID,
+		&i.TgMessageID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const insertDraft = `-- name: InsertDraft :one
+INSERT INTO drafts (campaign_id, account_id, via, text, extra)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (campaign_id, account_id) DO NOTHING
+RETURNING id, campaign_id, account_id, via, text, extra, status, scheduled_at, approved_at, attempt_key, attempts, published_at, published_external_id, published_url, content_item_id, error, tg_chat_id, tg_message_id, updated_at
+`
+
+type InsertDraftParams struct {
+	CampaignID int64
+	AccountID  int64
+	Via        string
+	Text       string
+	Extra      []byte
+}
+
+func (q *Queries) InsertDraft(ctx context.Context, arg InsertDraftParams) (Draft, error) {
+	row := q.db.QueryRow(ctx, insertDraft,
+		arg.CampaignID,
+		arg.AccountID,
+		arg.Via,
+		arg.Text,
+		arg.Extra,
+	)
+	var i Draft
+	err := row.Scan(
+		&i.ID,
+		&i.CampaignID,
+		&i.AccountID,
+		&i.Via,
+		&i.Text,
+		&i.Extra,
+		&i.Status,
+		&i.ScheduledAt,
+		&i.ApprovedAt,
+		&i.AttemptKey,
+		&i.Attempts,
+		&i.PublishedAt,
+		&i.PublishedExternalID,
+		&i.PublishedUrl,
+		&i.ContentItemID,
+		&i.Error,
+		&i.TgChatID,
+		&i.TgMessageID,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const insertEvent = `-- name: InsertEvent :one
@@ -391,6 +819,59 @@ func (q *Queries) InsertInboundItem(ctx context.Context, arg InsertInboundItemPa
 	var id int64
 	err := row.Scan(&id)
 	return id, err
+}
+
+const insertMediaAsset = `-- name: InsertMediaAsset :one
+INSERT INTO media_assets (token, path, name, mime, bytes, sha256, width, height, duration_ms, alt, expires_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+RETURNING id, token, path, name, mime, bytes, sha256, width, height, duration_ms, alt, created_at, expires_at
+`
+
+type InsertMediaAssetParams struct {
+	Token      string
+	Path       string
+	Name       string
+	Mime       string
+	Bytes      int64
+	Sha256     string
+	Width      *int32
+	Height     *int32
+	DurationMs *int32
+	Alt        *string
+	ExpiresAt  time.Time
+}
+
+func (q *Queries) InsertMediaAsset(ctx context.Context, arg InsertMediaAssetParams) (MediaAsset, error) {
+	row := q.db.QueryRow(ctx, insertMediaAsset,
+		arg.Token,
+		arg.Path,
+		arg.Name,
+		arg.Mime,
+		arg.Bytes,
+		arg.Sha256,
+		arg.Width,
+		arg.Height,
+		arg.DurationMs,
+		arg.Alt,
+		arg.ExpiresAt,
+	)
+	var i MediaAsset
+	err := row.Scan(
+		&i.ID,
+		&i.Token,
+		&i.Path,
+		&i.Name,
+		&i.Mime,
+		&i.Bytes,
+		&i.Sha256,
+		&i.Width,
+		&i.Height,
+		&i.DurationMs,
+		&i.Alt,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+	)
+	return i, err
 }
 
 const insertMetricSnapshot = `-- name: InsertMetricSnapshot :one
@@ -599,6 +1080,55 @@ func (q *Queries) MarkApifyRunProcessed(ctx context.Context, arg MarkApifyRunPro
 	return err
 }
 
+const markDraftPublished = `-- name: MarkDraftPublished :one
+UPDATE drafts SET status = 'published', published_url = COALESCE($1, published_url),
+    published_external_id = COALESCE($2, published_external_id),
+    content_item_id = COALESCE($3, content_item_id),
+    published_at = COALESCE(published_at, now()), error = NULL, updated_at = now()
+WHERE id = $4 AND status IN ('sent', 'unknown', 'published')
+RETURNING id, campaign_id, account_id, via, text, extra, status, scheduled_at, approved_at, attempt_key, attempts, published_at, published_external_id, published_url, content_item_id, error, tg_chat_id, tg_message_id, updated_at
+`
+
+type MarkDraftPublishedParams struct {
+	Url           *string
+	ExternalID    *string
+	ContentItemID *int64
+	ID            int64
+}
+
+// Olin confirmed a sent/unknown draft with its URL, or the next collect matched it.
+func (q *Queries) MarkDraftPublished(ctx context.Context, arg MarkDraftPublishedParams) (Draft, error) {
+	row := q.db.QueryRow(ctx, markDraftPublished,
+		arg.Url,
+		arg.ExternalID,
+		arg.ContentItemID,
+		arg.ID,
+	)
+	var i Draft
+	err := row.Scan(
+		&i.ID,
+		&i.CampaignID,
+		&i.AccountID,
+		&i.Via,
+		&i.Text,
+		&i.Extra,
+		&i.Status,
+		&i.ScheduledAt,
+		&i.ApprovedAt,
+		&i.AttemptKey,
+		&i.Attempts,
+		&i.PublishedAt,
+		&i.PublishedExternalID,
+		&i.PublishedUrl,
+		&i.ContentItemID,
+		&i.Error,
+		&i.TgChatID,
+		&i.TgMessageID,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const markEventFailed = `-- name: MarkEventFailed :exec
 UPDATE events SET attempts = attempts + 1, last_error = $2, next_attempt_at = $3 WHERE id = $1
 `
@@ -621,6 +1151,36 @@ UPDATE events SET sent_at = now(), attempts = attempts + 1, last_error = NULL WH
 func (q *Queries) MarkEventSent(ctx context.Context, id int64) error {
 	_, err := q.db.Exec(ctx, markEventSent, id)
 	return err
+}
+
+const mediaByToken = `-- name: MediaByToken :one
+SELECT id, token, path, name, mime, bytes, sha256, width, height, duration_ms, alt, created_at, expires_at FROM media_assets WHERE token = $1 AND expires_at > $2
+`
+
+type MediaByTokenParams struct {
+	Token     string
+	ExpiresAt time.Time
+}
+
+func (q *Queries) MediaByToken(ctx context.Context, arg MediaByTokenParams) (MediaAsset, error) {
+	row := q.db.QueryRow(ctx, mediaByToken, arg.Token, arg.ExpiresAt)
+	var i MediaAsset
+	err := row.Scan(
+		&i.ID,
+		&i.Token,
+		&i.Path,
+		&i.Name,
+		&i.Mime,
+		&i.Bytes,
+		&i.Sha256,
+		&i.Width,
+		&i.Height,
+		&i.DurationMs,
+		&i.Alt,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+	)
+	return i, err
 }
 
 const pendingEvents = `-- name: PendingEvents :many
@@ -681,6 +1241,68 @@ func (q *Queries) PostponeCollector(ctx context.Context, arg PostponeCollectorPa
 	return err
 }
 
+const requeueUnknownDraft = `-- name: RequeueUnknownDraft :one
+UPDATE drafts SET status = 'approved', error = NULL, updated_at = now() WHERE id = $1 AND status = 'unknown' RETURNING id, campaign_id, account_id, via, text, extra, status, scheduled_at, approved_at, attempt_key, attempts, published_at, published_external_id, published_url, content_item_id, error, tg_chat_id, tg_message_id, updated_at
+`
+
+func (q *Queries) RequeueUnknownDraft(ctx context.Context, id int64) (Draft, error) {
+	row := q.db.QueryRow(ctx, requeueUnknownDraft, id)
+	var i Draft
+	err := row.Scan(
+		&i.ID,
+		&i.CampaignID,
+		&i.AccountID,
+		&i.Via,
+		&i.Text,
+		&i.Extra,
+		&i.Status,
+		&i.ScheduledAt,
+		&i.ApprovedAt,
+		&i.AttemptKey,
+		&i.Attempts,
+		&i.PublishedAt,
+		&i.PublishedExternalID,
+		&i.PublishedUrl,
+		&i.ContentItemID,
+		&i.Error,
+		&i.TgChatID,
+		&i.TgMessageID,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const retryDraft = `-- name: RetryDraft :one
+UPDATE drafts SET status = 'approved', updated_at = now() WHERE id = $1 AND status = 'publishing' RETURNING id, campaign_id, account_id, via, text, extra, status, scheduled_at, approved_at, attempt_key, attempts, published_at, published_external_id, published_url, content_item_id, error, tg_chat_id, tg_message_id, updated_at
+`
+
+func (q *Queries) RetryDraft(ctx context.Context, id int64) (Draft, error) {
+	row := q.db.QueryRow(ctx, retryDraft, id)
+	var i Draft
+	err := row.Scan(
+		&i.ID,
+		&i.CampaignID,
+		&i.AccountID,
+		&i.Via,
+		&i.Text,
+		&i.Extra,
+		&i.Status,
+		&i.ScheduledAt,
+		&i.ApprovedAt,
+		&i.AttemptKey,
+		&i.Attempts,
+		&i.PublishedAt,
+		&i.PublishedExternalID,
+		&i.PublishedUrl,
+		&i.ContentItemID,
+		&i.Error,
+		&i.TgChatID,
+		&i.TgMessageID,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const retryableApifyRuns = `-- name: RetryableApifyRuns :many
 SELECT run_id, task_id, task_name, actor_id, dataset_id, status, state, attempts, last_error, next_attempt_at, started_at, finished_at, items, new_items, cost_usd, received_at, processed_at FROM apify_runs
 WHERE state IN ('received', 'failed') AND attempts < $1::int AND next_attempt_at <= now()
@@ -715,6 +1337,220 @@ func (q *Queries) RetryableApifyRuns(ctx context.Context, maxAttempts int32) ([]
 			&i.CostUsd,
 			&i.ReceivedAt,
 			&i.ProcessedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const sentDraftsForAccount = `-- name: SentDraftsForAccount :many
+SELECT id, campaign_id, account_id, via, text, extra, status, scheduled_at, approved_at, attempt_key, attempts, published_at, published_external_id, published_url, content_item_id, error, tg_chat_id, tg_message_id, updated_at FROM drafts WHERE account_id = $1 AND status = 'sent' AND published_at >= $2 ORDER BY published_at
+`
+
+type SentDraftsForAccountParams struct {
+	AccountID   int64
+	PublishedAt *time.Time
+}
+
+func (q *Queries) SentDraftsForAccount(ctx context.Context, arg SentDraftsForAccountParams) ([]Draft, error) {
+	rows, err := q.db.Query(ctx, sentDraftsForAccount, arg.AccountID, arg.PublishedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Draft{}
+	for rows.Next() {
+		var i Draft
+		if err := rows.Scan(
+			&i.ID,
+			&i.CampaignID,
+			&i.AccountID,
+			&i.Via,
+			&i.Text,
+			&i.Extra,
+			&i.Status,
+			&i.ScheduledAt,
+			&i.ApprovedAt,
+			&i.AttemptKey,
+			&i.Attempts,
+			&i.PublishedAt,
+			&i.PublishedExternalID,
+			&i.PublishedUrl,
+			&i.ContentItemID,
+			&i.Error,
+			&i.TgChatID,
+			&i.TgMessageID,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const setCampaignMessage = `-- name: SetCampaignMessage :exec
+UPDATE campaigns SET tg_chat_id = $2, tg_message_id = $3 WHERE id = $1
+`
+
+type SetCampaignMessageParams struct {
+	ID          int64
+	TgChatID    *int64
+	TgMessageID *int64
+}
+
+func (q *Queries) SetCampaignMessage(ctx context.Context, arg SetCampaignMessageParams) error {
+	_, err := q.db.Exec(ctx, setCampaignMessage, arg.ID, arg.TgChatID, arg.TgMessageID)
+	return err
+}
+
+const setDraftMessage = `-- name: SetDraftMessage :exec
+UPDATE drafts SET tg_chat_id = $2, tg_message_id = $3 WHERE id = $1
+`
+
+type SetDraftMessageParams struct {
+	ID          int64
+	TgChatID    *int64
+	TgMessageID *int64
+}
+
+func (q *Queries) SetDraftMessage(ctx context.Context, arg SetDraftMessageParams) error {
+	_, err := q.db.Exec(ctx, setDraftMessage, arg.ID, arg.TgChatID, arg.TgMessageID)
+	return err
+}
+
+const setDraftText = `-- name: SetDraftText :one
+UPDATE drafts SET text = $2, extra = $3, updated_at = now()
+WHERE id = $1 AND status IN ('draft', 'approved', 'failed')
+RETURNING id, campaign_id, account_id, via, text, extra, status, scheduled_at, approved_at, attempt_key, attempts, published_at, published_external_id, published_url, content_item_id, error, tg_chat_id, tg_message_id, updated_at
+`
+
+type SetDraftTextParams struct {
+	ID    int64
+	Text  string
+	Extra []byte
+}
+
+// Editing is allowed until the draft is handed to the publisher.
+func (q *Queries) SetDraftText(ctx context.Context, arg SetDraftTextParams) (Draft, error) {
+	row := q.db.QueryRow(ctx, setDraftText, arg.ID, arg.Text, arg.Extra)
+	var i Draft
+	err := row.Scan(
+		&i.ID,
+		&i.CampaignID,
+		&i.AccountID,
+		&i.Via,
+		&i.Text,
+		&i.Extra,
+		&i.Status,
+		&i.ScheduledAt,
+		&i.ApprovedAt,
+		&i.AttemptKey,
+		&i.Attempts,
+		&i.PublishedAt,
+		&i.PublishedExternalID,
+		&i.PublishedUrl,
+		&i.ContentItemID,
+		&i.Error,
+		&i.TgChatID,
+		&i.TgMessageID,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const setKV = `-- name: SetKV :exec
+INSERT INTO kv (key, value) VALUES ($1, $2)
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+`
+
+type SetKVParams struct {
+	Key   string
+	Value string
+}
+
+func (q *Queries) SetKV(ctx context.Context, arg SetKVParams) error {
+	_, err := q.db.Exec(ctx, setKV, arg.Key, arg.Value)
+	return err
+}
+
+const skipDraft = `-- name: SkipDraft :one
+UPDATE drafts SET status = 'skipped', updated_at = now()
+WHERE id = $1 AND status IN ('draft', 'approved', 'failed', 'unknown')
+RETURNING id, campaign_id, account_id, via, text, extra, status, scheduled_at, approved_at, attempt_key, attempts, published_at, published_external_id, published_url, content_item_id, error, tg_chat_id, tg_message_id, updated_at
+`
+
+func (q *Queries) SkipDraft(ctx context.Context, id int64) (Draft, error) {
+	row := q.db.QueryRow(ctx, skipDraft, id)
+	var i Draft
+	err := row.Scan(
+		&i.ID,
+		&i.CampaignID,
+		&i.AccountID,
+		&i.Via,
+		&i.Text,
+		&i.Extra,
+		&i.Status,
+		&i.ScheduledAt,
+		&i.ApprovedAt,
+		&i.AttemptKey,
+		&i.Attempts,
+		&i.PublishedAt,
+		&i.PublishedExternalID,
+		&i.PublishedUrl,
+		&i.ContentItemID,
+		&i.Error,
+		&i.TgChatID,
+		&i.TgMessageID,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const strandedDrafts = `-- name: StrandedDrafts :many
+UPDATE drafts SET status = 'unknown', error = 'hub restarted while publishing', updated_at = now()
+WHERE status = 'publishing'
+RETURNING id, campaign_id, account_id, via, text, extra, status, scheduled_at, approved_at, attempt_key, attempts, published_at, published_external_id, published_url, content_item_id, error, tg_chat_id, tg_message_id, updated_at
+`
+
+// Drafts left in publishing by a crash: the post may or may not exist.
+func (q *Queries) StrandedDrafts(ctx context.Context) ([]Draft, error) {
+	rows, err := q.db.Query(ctx, strandedDrafts)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Draft{}
+	for rows.Next() {
+		var i Draft
+		if err := rows.Scan(
+			&i.ID,
+			&i.CampaignID,
+			&i.AccountID,
+			&i.Via,
+			&i.Text,
+			&i.Extra,
+			&i.Status,
+			&i.ScheduledAt,
+			&i.ApprovedAt,
+			&i.AttemptKey,
+			&i.Attempts,
+			&i.PublishedAt,
+			&i.PublishedExternalID,
+			&i.PublishedUrl,
+			&i.ContentItemID,
+			&i.Error,
+			&i.TgChatID,
+			&i.TgMessageID,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}

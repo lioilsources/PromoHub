@@ -141,6 +141,7 @@ func (h *Hub) runJob(ctx context.Context, j job, row db.CollectorState) {
 	if res.Events > 0 {
 		nudge(h.wakeEvents)
 	}
+	h.afterIngest(ctx, res)
 }
 
 func (h *Hub) collectFailed(ctx context.Context, j job, row db.CollectorState, at time.Time, cause error) {

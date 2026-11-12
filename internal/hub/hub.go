@@ -9,18 +9,22 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
+	"sync"
 	"time"
 
 	"github.com/lioilsources/promohub/internal/apify"
 	"github.com/lioilsources/promohub/internal/collectors"
 	"github.com/lioilsources/promohub/internal/collectors/apifysrc"
+	"github.com/lioilsources/promohub/internal/composer"
 	"github.com/lioilsources/promohub/internal/config"
 	"github.com/lioilsources/promohub/internal/ifttt"
 	"github.com/lioilsources/promohub/internal/metrics"
 	"github.com/lioilsources/promohub/internal/notify"
+	"github.com/lioilsources/promohub/internal/publish"
 	"github.com/lioilsources/promohub/internal/rules"
 	"github.com/lioilsources/promohub/internal/store"
 	"github.com/lioilsources/promohub/internal/store/db"
+	"github.com/lioilsources/promohub/internal/tgbot"
 )
 
 // defaultMaxItems caps dataset reads for tasks without max_items.
@@ -40,14 +44,24 @@ type Hub struct {
 	rand     func() float64
 
 	collectors map[string]collectors.Collector // platform → read adapter
+	publishers map[string]publish.Publisher    // platform → API publisher
+	accounts   map[int64]config.Account        // accounts.id → account
+	ownHosts   []string
+	llm        *composer.LLM
+	bot        *tgbot.Client // nil: no approvals, so nothing is published
+	admins     []int64
+	after      func(time.Duration, func()) // time.AfterFunc, replaceable in tests
+	kickMu     sync.Mutex
+	kicked     map[string]time.Time
 	jobs       map[jobKey]job
 	terms      []string
 
 	accountIDs map[string]int64 // "platform:handle" → accounts.id
 	appIDs     map[string]int64 // slug → apps.id
 
-	wakeRuns   chan struct{}
-	wakeEvents chan struct{}
+	wakeRuns    chan struct{}
+	wakeEvents  chan struct{}
+	wakePublish chan struct{}
 }
 
 type Deps struct {
@@ -62,6 +76,11 @@ type Deps struct {
 	Metrics  *metrics.Registry
 	// Collectors are the official-API read adapters by platform (internal/platforms).
 	Collectors []collectors.Collector
+	Publishers []publish.Publisher
+	// Bot and Admins enable the approval bot; without them nothing is published.
+	Bot    *tgbot.Client
+	Admins []int64
+	LLM    *composer.LLM
 }
 
 func New(d Deps) *Hub {
@@ -69,7 +88,11 @@ func New(d Deps) *Hub {
 		log: d.Log, env: d.Env, files: d.Files, rules: d.Rules, store: d.Store, apify: d.Apify,
 		ifttt: d.IFTTT, telegram: d.Telegram, metrics: d.Metrics, now: time.Now, rand: rand.Float64,
 		collectors: map[string]collectors.Collector{}, jobs: map[jobKey]job{}, terms: searchTerms(d.Files),
-		accountIDs: map[string]int64{}, appIDs: map[string]int64{},
+		publishers: map[string]publish.Publisher{}, accounts: map[int64]config.Account{}, ownHosts: composer.OwnHosts(d.Files.Apps),
+		llm: d.LLM, bot: d.Bot, admins: d.Admins, kicked: map[string]time.Time{},
+		after:       func(d time.Duration, f func()) { time.AfterFunc(d, f) },
+		wakePublish: make(chan struct{}, 1),
+		accountIDs:  map[string]int64{}, appIDs: map[string]int64{},
 		wakeRuns: make(chan struct{}, 1), wakeEvents: make(chan struct{}, 1),
 	}
 	if h.metrics == nil {
@@ -83,6 +106,10 @@ func New(d Deps) *Hub {
 	for _, c := range d.Collectors {
 		h.collectors[c.Platform()] = c
 	}
+	for _, p := range d.Publishers {
+		h.publishers[p.Platform()] = p
+	}
+	h.metrics.Help("promohub_publish_total", "Draft outcomes by platform, path and status.")
 	return h
 }
 
@@ -96,6 +123,7 @@ func (h *Hub) SyncConfig(ctx context.Context) error {
 			return fmt.Errorf("account %s: %w", a.Key(), err)
 		}
 		h.accountIDs[a.Key()] = id
+		h.accounts[id] = a
 	}
 	for _, a := range h.files.Apps {
 		links, _ := json.Marshal(a.Links)
@@ -124,6 +152,15 @@ func nudge(c chan struct{}) {
 func (h *Hub) Run(ctx context.Context) {
 	go h.loop(ctx, "runs", h.wakeRuns, h.processPendingRuns)
 	go h.loop(ctx, "collect", nil, h.collectDue)
+	if h.bot != nil {
+		if err := h.recoverStranded(ctx); err != nil {
+			h.log.Error("recover stranded drafts", "err", err)
+		}
+		go h.botLoop(ctx)
+		go h.loop(ctx, "publish", h.wakePublish, h.publishDue)
+	} else {
+		h.log.Warn("telegram bot not configured (TELEGRAM_BOT_TOKEN, TELEGRAM_ADMIN_IDS): publishing is off")
+	}
 	h.loop(ctx, "events", h.wakeEvents, h.deliverPending)
 }
 
@@ -229,5 +266,6 @@ func (h *Hub) ProcessRun(ctx context.Context, runID string) error {
 	if res.Events > 0 {
 		nudge(h.wakeEvents)
 	}
+	h.afterIngest(ctx, res)
 	return nil
 }

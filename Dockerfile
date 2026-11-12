@@ -6,10 +6,13 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/promohub ./cmd/promohub
+# Owned by the nonroot user, so a fresh named volume on /data/media is writable.
+RUN mkdir -p /out/data/media
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/promohub /usr/local/bin/promohub
-ENV LISTEN_ADDR=:8080 CONFIG_DIR=/config
+COPY --from=build --chown=65532:65532 /out/data /data
+ENV LISTEN_ADDR=:8080 CONFIG_DIR=/config MEDIA_DIR=/data/media
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s CMD ["/usr/local/bin/promohub", "healthcheck"]
 ENTRYPOINT ["/usr/local/bin/promohub"]
