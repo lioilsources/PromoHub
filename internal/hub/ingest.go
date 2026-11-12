@@ -141,10 +141,14 @@ func (h *Hub) Ingest(ctx context.Context, q *db.Queries, src Source, b collector
 
 	for _, in := range b.Inbound {
 		appID, appSlug := h.appFor(in.Text)
-		_, err := q.InsertInboundItem(ctx, db.InsertInboundItemParams{
+		ip := db.InsertInboundItemParams{
 			Platform: in.Platform, Kind: in.Kind, ExternalID: in.ExternalID, AppID: appID,
 			Author: nz(in.Author), Text: nz(in.Text), Rating: in.Rating, Url: nz(in.URL), CreatedAt: in.CreatedAt,
-		})
+		}
+		if hasAcct {
+			ip.AccountID = &acctID
+		}
+		inboundID, err := q.InsertInboundItem(ctx, ip)
 		if store.NoRows(err) {
 			continue
 		} else if err != nil {
@@ -159,6 +163,7 @@ func (h *Hub) Ingest(ctx context.Context, q *db.Queries, src Source, b collector
 		payload := map[string]any{
 			"platform": in.Platform, "kind": in.Kind, "author": in.Author, "text": in.Text,
 			"url": in.URL, "app": appSlug, "external_id": in.ExternalID,
+			"inbound_id": inboundID,
 		}
 		if in.Rating != nil {
 			v.Num["rating"] = float64(*in.Rating)

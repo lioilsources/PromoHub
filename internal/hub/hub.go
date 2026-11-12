@@ -46,6 +46,7 @@ type Hub struct {
 
 	collectors     map[string]collectors.Collector // platform → read adapter
 	publishers     map[string]publish.Publisher    // platform → API publisher
+	repliers       map[string]publish.Replier      // platform → reply from Telegram
 	accounts       map[int64]config.Account        // accounts.id → account
 	ownHosts       []string
 	llm            *composer.LLM
@@ -111,8 +112,12 @@ func New(d Deps) *Hub {
 	for _, c := range d.Collectors {
 		h.collectors[c.Platform()] = c
 	}
+	h.repliers = map[string]publish.Replier{}
 	for _, p := range d.Publishers {
 		h.publishers[p.Platform()] = p
+		if r, ok := p.(publish.Replier); ok {
+			h.repliers[p.Platform()] = r
+		}
 	}
 	h.metrics.Help("promohub_publish_total", "Draft outcomes by platform, path and status.")
 	return h

@@ -125,6 +125,11 @@ func (h *Hub) handleMessage(ctx context.Context, m *tgbot.Message) string {
 	switch cmd {
 	case "/post":
 		return h.cmdPost(ctx, m, rest)
+	case "/stats":
+		if _, err := h.bot.Send(ctx, m.Chat.ID, h.cmdStats(ctx), tgbot.Opts{HTML: true}); err != nil {
+			return err.Error()
+		}
+		return ""
 	case "/connect":
 		return h.cmdConnect(ctx, m.Chat.ID, rest)
 	case "/start", "/help":
@@ -138,7 +143,8 @@ func (h *Hub) handleMessage(ctx context.Context, m *tgbot.Message) string {
 const helpText = `/post [slug] [cs|en] text… [odkaz] [media=ID]
 Vytvoří kampaň a pošle draft pro každý účet. Fotka s popiskem /post … se přiloží.
 Delší video nahraj přes make media a přidej media=ID.
-/connect platform:handle — připojí OAuth účet (Instagram, Threads, Facebook, YouTube, TikTok).`
+/connect platform:handle — připojí OAuth účet (Instagram, Threads, Facebook, YouTube, TikTok).
+/stats — srovnání účtů: sledující, změna za 7 a 30 dní, posty a engagement.`
 
 // cmdPost parses "/post [app] [lang] [media=ID…] text… [link]" and proposes a campaign.
 func (h *Hub) cmdPost(ctx context.Context, m *tgbot.Message, rest string) string {
@@ -472,8 +478,11 @@ func (h *Hub) handleCallback(ctx context.Context, chat int64, data string) strin
 		return "?"
 	}
 	kind, act := parts[0], parts[2]
-	if kind == "c" {
+	switch kind {
+	case "c":
 		return h.campaignAction(ctx, id, act)
+	case "r":
+		return h.replyPrompt(ctx, chat, id)
 	}
 	d, err := h.store.GetDraft(ctx, id)
 	if err != nil {
@@ -551,12 +560,15 @@ func (h *Hub) campaignAction(ctx context.Context, id int64, act string) string {
 func (h *Hub) handleReply(ctx context.Context, action, text string) (string, bool) {
 	kind, idStr, _ := strings.Cut(action, ":")
 	id, _ := strconv.ParseInt(idStr, 10, 64)
+	text = strings.TrimSpace(text)
+	if kind == "reply" { // id is an inbound item here, not a draft
+		return h.sendReply(ctx, id, text)
+	}
 	d, err := h.store.GetDraft(ctx, id)
 	if err != nil {
 		return "draft neexistuje", true
 	}
 	acct := h.accounts[d.AccountID]
-	text = strings.TrimSpace(text)
 	switch kind {
 	case "edit":
 		spec, _ := platform.Lookup(acct.Platform)

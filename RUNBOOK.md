@@ -305,3 +305,25 @@ Pošli video botovi s popiskem `/post …`, do 20 MB přímo. Větší nahraj p�
 YouTube Analytics: po `/connect youtube:<handle>` (OAuth klient z promptu 5) přibudou u videí metriky za 28 dní: `watch_minutes_28d`, `avg_view_seconds_28d` a `subscribers_gained_28d`.
 
 TikTok čtení přes API místo Apify: u účtu nastav `read: api` a Apify task `tiktok-profile` smaž.
+
+---
+
+## 10. Vlna 5 — HN, Product Hunt, dev.to, odpovědi a /stats
+
+1. Účty podle promptu 8 v `Prompts/02-CHROME_PROMPTS.md`. Do `accounts.yaml`:
+   - `platform: hackernews` (handle = HN jméno);
+   - `platform: producthunt` s `auth_ref: PRODUCTHUNT` → `PRODUCTHUNT_TOKEN`;
+   - `platform: devto` s `auth_ref: DEVTO_MAIN` → `DEVTO_MAIN_API_KEY`.
+2. Zmínky appek na HN hledá hub každých 30 min podle jmen a klíčových slov z `apps.yaml`.
+3. **Odpovědi z Telegramu.** Pravidlo s cílem `telegram:<sink>` pro `inbound.*` pošle zprávu přes bota s tlačítkem ↩️ Odpovědět. Odpověz textem a hub ho pošle na platformu pod tvým účtem, bez dalšího schvalování.
+   - Funguje na Bluesky, Mastodonu, Threads, Instagramu, Facebooku a YouTube (s OAuth).
+   - Sink musí být číselné chat ID, ne `@kanál`.
+   - Příklad v `rules.yaml`:
+     ```yaml
+     - name: mention_tg
+       on: inbound.mention
+       then: telegram:urgent
+     ```
+4. **`/stats`** v Telegramu vypíše tabulku účtů: sledující, změna za 7 a 30 dní, posty za 30 dní a průměrný engagement na post.
+
+Nehotové: Apify kind `reddit-profile`, protože chybí fixture z reálného běhu actoru. Reddit profil zatím nemá metriky, zmínky jdou dál přes `reddit-mentions`.
