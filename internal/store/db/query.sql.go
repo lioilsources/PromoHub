@@ -10,6 +10,28 @@ import (
 	"time"
 )
 
+const accountByKey = `-- name: AccountByKey :one
+SELECT id, platform, handle, external_id, auth_ref FROM accounts WHERE platform = $1 AND handle = $2
+`
+
+type AccountByKeyParams struct {
+	Platform string
+	Handle   string
+}
+
+func (q *Queries) AccountByKey(ctx context.Context, arg AccountByKeyParams) (Account, error) {
+	row := q.db.QueryRow(ctx, accountByKey, arg.Platform, arg.Handle)
+	var i Account
+	err := row.Scan(
+		&i.ID,
+		&i.Platform,
+		&i.Handle,
+		&i.ExternalID,
+		&i.AuthRef,
+	)
+	return i, err
+}
+
 const accountSnapshotAtOrBefore = `-- name: AccountSnapshotAtOrBefore :one
 SELECT id, content_item_id, account_id, platform, taken_at, likes, views, reposts, comments, followers, extra, source_run_id FROM metric_snapshots
 WHERE account_id = $1 AND taken_at <= $2
@@ -299,6 +321,20 @@ func (q *Queries) ContentSnapshotAtOrBefore(ctx context.Context, arg ContentSnap
 	return i, err
 }
 
+const credentialError = `-- name: CredentialError :exec
+UPDATE credentials SET last_error = $2 WHERE account_id = $1
+`
+
+type CredentialErrorParams struct {
+	AccountID int64
+	LastError *string
+}
+
+func (q *Queries) CredentialError(ctx context.Context, arg CredentialErrorParams) error {
+	_, err := q.db.Exec(ctx, credentialError, arg.AccountID, arg.LastError)
+	return err
+}
+
 const deleteKV = `-- name: DeleteKV :exec
 DELETE FROM kv WHERE key = $1
 `
@@ -549,6 +585,27 @@ func (q *Queries) GetCampaign(ctx context.Context, id int64) (Campaign, error) {
 		&i.TgChatID,
 		&i.TgMessageID,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getCredential = `-- name: GetCredential :one
+SELECT account_id, provider, ciphertext, nonce, scopes, expires_at, refresh_expires_at, updated_at, last_error FROM credentials WHERE account_id = $1
+`
+
+func (q *Queries) GetCredential(ctx context.Context, accountID int64) (Credential, error) {
+	row := q.db.QueryRow(ctx, getCredential, accountID)
+	var i Credential
+	err := row.Scan(
+		&i.AccountID,
+		&i.Provider,
+		&i.Ciphertext,
+		&i.Nonce,
+		&i.Scopes,
+		&i.ExpiresAt,
+		&i.RefreshExpiresAt,
+		&i.UpdatedAt,
+		&i.LastError,
 	)
 	return i, err
 }
@@ -1032,6 +1089,40 @@ func (q *Queries) ListCollectorStates(ctx context.Context) ([]CollectorState, er
 	return items, nil
 }
 
+const listCredentials = `-- name: ListCredentials :many
+SELECT account_id, provider, ciphertext, nonce, scopes, expires_at, refresh_expires_at, updated_at, last_error FROM credentials ORDER BY account_id
+`
+
+func (q *Queries) ListCredentials(ctx context.Context) ([]Credential, error) {
+	rows, err := q.db.Query(ctx, listCredentials)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Credential{}
+	for rows.Next() {
+		var i Credential
+		if err := rows.Scan(
+			&i.AccountID,
+			&i.Provider,
+			&i.Ciphertext,
+			&i.Nonce,
+			&i.Scopes,
+			&i.ExpiresAt,
+			&i.RefreshExpiresAt,
+			&i.UpdatedAt,
+			&i.LastError,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markApifyRunFailed = `-- name: MarkApifyRunFailed :exec
 UPDATE apify_runs SET state = 'failed', attempts = attempts + 1, last_error = $2, next_attempt_at = $3 WHERE run_id = $1
 `
@@ -1238,6 +1329,37 @@ type PostponeCollectorParams struct {
 
 func (q *Queries) PostponeCollector(ctx context.Context, arg PostponeCollectorParams) error {
 	_, err := q.db.Exec(ctx, postponeCollector, arg.AccountID, arg.Capability, arg.NextRunAt)
+	return err
+}
+
+const putCredential = `-- name: PutCredential :exec
+INSERT INTO credentials (account_id, provider, ciphertext, nonce, scopes, expires_at, refresh_expires_at, updated_at, last_error)
+VALUES ($1, $2, $3, $4, $5, $6, $7, now(), NULL)
+ON CONFLICT (account_id) DO UPDATE
+SET provider = EXCLUDED.provider, ciphertext = EXCLUDED.ciphertext, nonce = EXCLUDED.nonce, scopes = EXCLUDED.scopes,
+    expires_at = EXCLUDED.expires_at, refresh_expires_at = EXCLUDED.refresh_expires_at, updated_at = now(), last_error = NULL
+`
+
+type PutCredentialParams struct {
+	AccountID        int64
+	Provider         string
+	Ciphertext       []byte
+	Nonce            []byte
+	Scopes           *string
+	ExpiresAt        *time.Time
+	RefreshExpiresAt *time.Time
+}
+
+func (q *Queries) PutCredential(ctx context.Context, arg PutCredentialParams) error {
+	_, err := q.db.Exec(ctx, putCredential,
+		arg.AccountID,
+		arg.Provider,
+		arg.Ciphertext,
+		arg.Nonce,
+		arg.Scopes,
+		arg.ExpiresAt,
+		arg.RefreshExpiresAt,
+	)
 	return err
 }
 

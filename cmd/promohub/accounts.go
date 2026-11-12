@@ -13,25 +13,34 @@ import (
 	"time"
 
 	"github.com/lioilsources/promohub/internal/collectors"
+	"github.com/lioilsources/promohub/internal/creds"
+	"github.com/lioilsources/promohub/internal/hub"
+	"github.com/lioilsources/promohub/internal/oauth"
 	"github.com/lioilsources/promohub/internal/platform"
 	"github.com/lioilsources/promohub/internal/platforms/bluesky"
 	"github.com/lioilsources/promohub/internal/platforms/discord"
+	"github.com/lioilsources/promohub/internal/platforms/facebook"
+	"github.com/lioilsources/promohub/internal/platforms/instagram"
 	"github.com/lioilsources/promohub/internal/platforms/mastodon"
 	"github.com/lioilsources/promohub/internal/platforms/telegram"
+	"github.com/lioilsources/promohub/internal/platforms/threads"
 	"github.com/lioilsources/promohub/internal/platforms/youtube"
 	"github.com/lioilsources/promohub/internal/publish"
 	"github.com/lioilsources/promohub/internal/store"
+	"github.com/lioilsources/promohub/internal/vault"
 )
 
-// readAdapters are the official-API collectors (Prompts/01-ACCOUNTS_PLAN.md §3.1).
-func readAdapters(hc *http.Client) []collectors.Collector {
+// readAdapters are the official-API collectors (Prompts/01-ACCOUNTS_PLAN.md §3.1). ts serves
+// OAuth tokens; nil makes OAuth accounts "not connected".
+func readAdapters(hc *http.Client, ts creds.TokenSource) []collectors.Collector {
 	return []collectors.Collector{
 		bluesky.New(hc), mastodon.New(hc), youtube.New(hc), telegram.New(hc), discord.New(hc),
+		instagram.New(hc, ts), threads.New(hc, ts), facebook.New(hc, ts),
 	}
 }
 
-func adapterFor(hc *http.Client, name string) collectors.Collector {
-	for _, c := range readAdapters(hc) {
+func adapterFor(hc *http.Client, ts creds.TokenSource, name string) collectors.Collector {
+	for _, c := range readAdapters(hc, ts) {
 		if c.Platform() == name {
 			return c
 		}
@@ -59,11 +68,15 @@ func accounts() error {
 		lastErr string
 	}
 	states := map[string]state{} // "platform:handle/capability"
+	var ts creds.TokenSource
 	if url := os.Getenv("DATABASE_URL"); url != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if st, err := store.Open(ctx, url); err == nil {
 			defer st.Close()
+			if v, err := vault.New(os.Getenv("PROMOHUB_SECRET_KEY")); err == nil {
+				ts = &oauth.Store{Q: st.Queries, Vault: v}
+			}
 			accts, _ := st.ListAccounts(ctx)
 			keys := map[int64]string{}
 			for _, a := range accts {
@@ -86,7 +99,7 @@ func accounts() error {
 			pub += " (" + a.IFTTTEvent + ")"
 		}
 		caps := spec.Capabilities()
-		c := adapterFor(nil, a.Platform)
+		c := adapterFor(nil, ts, a.Platform)
 		if a.Read != platform.ViaAPI || c == nil || len(caps) == 0 {
 			status := "-"
 			switch {
@@ -133,7 +146,7 @@ func probe(args []string) error {
 	if os.Getenv("PROBE_RAW") == "1" {
 		hc.Transport = dumpTransport{http.DefaultTransport}
 	}
-	c := adapterFor(hc, acct.Platform)
+	c := adapterFor(hc, cliTokens(), acct.Platform)
 	if c == nil {
 		return fmt.Errorf("no read adapter for %s", acct.Platform)
 	}
@@ -204,11 +217,71 @@ func oneLine(s string, n int) string {
 }
 
 // publishers are the official-API publish paths (wave 2).
-func publishers(hc *http.Client) []publish.Publisher {
+func publishers(hc *http.Client, ts creds.TokenSource) []publish.Publisher {
 	return []publish.Publisher{
+		instagram.Publisher{Adapter: instagram.New(hc, ts)},
+		threads.Publisher{Adapter: threads.New(hc, ts)},
+		facebook.Publisher{Adapter: facebook.New(hc, ts)},
 		bluesky.Publisher{Adapter: bluesky.New(hc)},
 		mastodon.Publisher{Adapter: mastodon.New(hc)},
 		telegram.Publisher{Adapter: telegram.New(hc)},
 		discord.Publisher{Adapter: discord.New(hc)},
 	}
+}
+
+// oauthClients builds the app credentials of every OAuth provider from the environment.
+func oauthClients(base string, hc *http.Client) map[string]oauth.Client {
+	out := map[string]oauth.Client{}
+	for name, p := range oauth.Registry {
+		out[name] = oauth.Client{ID: os.Getenv(p.ClientEnv), Secret: os.Getenv(p.SecretEnv), Redirect: hub.RedirectURI(base, name), HTTP: hc}
+	}
+	return out
+}
+
+// cliTokens gives probe access to stored OAuth tokens when DATABASE_URL and
+// PROMOHUB_SECRET_KEY are set (the connection stays open until the process exits).
+func cliTokens() creds.TokenSource {
+	url, key := os.Getenv("DATABASE_URL"), os.Getenv("PROMOHUB_SECRET_KEY")
+	if url == "" || key == "" {
+		return nil
+	}
+	v, err := vault.New(key)
+	if err != nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	st, err := store.Open(ctx, url)
+	if err != nil {
+		return nil
+	}
+	base := getenvDefault("PUBLIC_BASE_URL", "https://promo.ol1n.com")
+	return &oauth.Store{Q: st.Queries, Vault: v, Clients: oauthClients(base, &http.Client{Timeout: 30 * time.Second})}
+}
+
+// connect prints the OAuth link for an account (same as /connect in Telegram).
+func connect(args []string) error {
+	if len(args) != 1 {
+		return fmt.Errorf("usage: promohub connect <platform:handle>")
+	}
+	files, _, err := loadConfig(configDir())
+	if err != nil {
+		return err
+	}
+	acct, ok := files.Account(args[0])
+	if !ok {
+		return fmt.Errorf("account %q is not in accounts.yaml", args[0])
+	}
+	v, err := vault.New(os.Getenv("PROMOHUB_SECRET_KEY"))
+	if err != nil {
+		return err
+	}
+	p, err := oauth.Lookup(acct.Platform)
+	if err != nil {
+		return err
+	}
+	base := getenvDefault("PUBLIC_BASE_URL", "https://promo.ol1n.com")
+	fmt.Printf("Redirect URI for the %s app: %s\n", p.Name, hub.RedirectURI(base, p.Name))
+	fmt.Printf("Open within %s:\n%s/oauth/%s/start?state=%s\n", oauth.StateTTL, base, acct.Platform, oauth.State(v, acct.Key(), time.Now()))
+	return nil
 }

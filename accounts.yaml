@@ -43,6 +43,18 @@ accounts:
   # - platform: discord
   #   handle: TODO_server
   #   external_id: TODO_INVITE_CODE
+  # OAuth accounts: /connect <platform:handle> in Telegram after deploying (wave 3).
+  # - platform: instagram
+  #   handle: TODO_ig_handle
+  #   auth_ref: oauth
+  # - platform: threads
+  #   handle: TODO_ig_handle
+  #   auth_ref: oauth
+  # - platform: facebook
+  #   handle: TODO_page
+  #   external_id: TODO_PAGE_ID
+  #   auth_ref: oauth
+  #   publish: ifttt          # app posts are invisible while the Meta app is in Development mode
 
 apify_tasks:
   - name: x-profile

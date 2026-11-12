@@ -31,7 +31,9 @@ func TestComposePerPlatform(t *testing.T) {
 		},
 		"x":        func(d Draft) bool { return strings.Contains(d.Text, "utm_source=x") && !strings.Contains(d.Text, "#") },
 		"facebook": func(d Draft) bool { return !strings.Contains(d.Text, "https://") && d.Extra["link"] != "" },
-		"reddit":   func(d Draft) bool { return d.Extra["title"] == "SwypeKids 2.0 is out: offline mode and a new swipe game." },
+		"reddit": func(d Draft) bool {
+			return d.Extra["title"] == "SwypeKids 2.0 is out: offline mode and a new swipe game."
+		},
 		"instagram": func(d Draft) bool {
 			return strings.Contains(d.Text, "Link in bio.") && !strings.Contains(d.Text, "https://")
 		},

@@ -14,17 +14,18 @@ const (
 	OnInboundReview  = "inbound.review"
 	OnInboundMention = "inbound.mention"
 	OnInboundReply   = "inbound.reply"
-	OnMetricSnapshot = "metric.snapshot" // every stored snapshot
-	OnMetricDelta    = "metric.delta"    // a snapshot that has a predecessor to diff against
-	OnContentNew     = "content.new"     // first sighting of one of my posts
-	OnAccountError   = "account.error"   // a read adapter failed failAlertAt times in a row
-	OnPublishDone    = "publish.done"    // a draft is live (API answer, matched collect or pasted URL)
-	OnPublishFailed  = "publish.failed"  // a draft failed or its outcome is unknown
+	OnMetricSnapshot = "metric.snapshot"       // every stored snapshot
+	OnMetricDelta    = "metric.delta"          // a snapshot that has a predecessor to diff against
+	OnContentNew     = "content.new"           // first sighting of one of my posts
+	OnAccountError   = "account.error"         // a read adapter failed failAlertAt times in a row
+	OnPublishDone    = "publish.done"          // a draft is live (API answer, matched collect or pasted URL)
+	OnPublishFailed  = "publish.failed"        // a draft failed or its outcome is unknown
+	OnAuthExpiring   = "account.auth_expiring" // an OAuth token failed to refresh or expires within 7 days
 )
 
 var validOn = map[string]bool{
 	OnInboundComment: true, OnInboundReview: true, OnInboundMention: true, OnInboundReply: true,
-	OnMetricSnapshot: true, OnMetricDelta: true, OnContentNew: true, OnAccountError: true, OnPublishDone: true, OnPublishFailed: true,
+	OnMetricSnapshot: true, OnMetricDelta: true, OnContentNew: true, OnAccountError: true, OnPublishDone: true, OnPublishFailed: true, OnAuthExpiring: true,
 }
 
 // Target kinds. ifttt:<event> goes to the IFTTT Webhooks service, the others to a named sink.

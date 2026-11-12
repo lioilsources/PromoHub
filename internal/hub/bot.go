@@ -125,6 +125,8 @@ func (h *Hub) handleMessage(ctx context.Context, m *tgbot.Message) string {
 	switch cmd {
 	case "/post":
 		return h.cmdPost(ctx, m, rest)
+	case "/connect":
+		return h.cmdConnect(ctx, m.Chat.ID, rest)
 	case "/start", "/help":
 		return helpText
 	case "":
@@ -135,7 +137,8 @@ func (h *Hub) handleMessage(ctx context.Context, m *tgbot.Message) string {
 
 const helpText = `/post [slug] [cs|en] text… [odkaz] [media=ID]
 Vytvoří kampaň a pošle draft pro každý účet. Fotka s popiskem /post … se přiloží.
-Delší video nahraj přes make media a přidej media=ID.`
+Delší video nahraj přes make media a přidej media=ID.
+/connect platform:handle — připojí OAuth účet (Instagram, Threads, Facebook, YouTube, TikTok).`
 
 // cmdPost parses "/post [app] [lang] [media=ID…] text… [link]" and proposes a campaign.
 func (h *Hub) cmdPost(ctx context.Context, m *tgbot.Message, rest string) string {

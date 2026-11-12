@@ -3,9 +3,11 @@
 package creds
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/lioilsources/promohub/internal/config"
 )
@@ -42,3 +44,32 @@ func Static(a config.Account, suffix string) (string, error) {
 type MissingError struct{ Var string }
 
 func (e *MissingError) Error() string { return fmt.Sprintf("%s is not set", e.Var) }
+
+// Token is an OAuth grant the hub keeps encrypted in the credentials table.
+type Token struct {
+	AccessToken      string     `json:"access_token"`
+	RefreshToken     string     `json:"refresh_token,omitempty"`
+	UserID           string     `json:"user_id,omitempty"` // platform user ID (Instagram, Threads, TikTok open_id)
+	PageID           string     `json:"page_id,omitempty"` // Facebook: AccessToken is this page's token
+	Scopes           string     `json:"scopes,omitempty"`
+	ExpiresAt        *time.Time `json:"expires_at,omitempty"`
+	RefreshExpiresAt *time.Time `json:"refresh_expires_at,omitempty"`
+}
+
+// TokenSource hands adapters the current OAuth token of an account.
+type TokenSource interface {
+	Token(ctx context.Context, acct config.Account) (Token, error)
+}
+
+// NotConnected is the MissingError of an OAuth account without a token yet.
+func NotConnected(acct config.Account) error {
+	return &MissingError{Var: "OAuth token (/connect " + acct.Key() + ")"}
+}
+
+// OAuthToken returns the account's token or a MissingError when there is none.
+func OAuthToken(ctx context.Context, ts TokenSource, acct config.Account) (Token, error) {
+	if ts == nil {
+		return Token{}, NotConnected(acct)
+	}
+	return ts.Token(ctx, acct)
+}

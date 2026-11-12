@@ -14,11 +14,12 @@ import (
 type Registry struct {
 	mu     sync.Mutex
 	help   map[string]string
+	gauges map[string]bool
 	values map[string]map[string]float64 // name → rendered labels → value
 }
 
 func New() *Registry {
-	return &Registry{help: map[string]string{}, values: map[string]map[string]float64{}}
+	return &Registry{help: map[string]string{}, gauges: map[string]bool{}, values: map[string]map[string]float64{}}
 }
 
 // Help registers a counter description so it shows up even before the first increment.
@@ -35,6 +36,27 @@ func (r *Registry) Help(name, text string) {
 func (r *Registry) Inc(name string, labels ...string) { r.Add(name, 1, labels...) }
 
 func (r *Registry) Add(name string, v float64, labels ...string) {
+	k := renderLabels(labels)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.values[name] == nil {
+		r.values[name] = map[string]float64{}
+	}
+	r.values[name][k] += v
+}
+
+// Set stores a gauge value (replacing the previous one).
+func (r *Registry) Set(name string, v float64, labels ...string) {
+	r.mu.Lock()
+	r.gauges[name] = true
+	if r.values[name] == nil {
+		r.values[name] = map[string]float64{}
+	}
+	r.values[name][renderLabels(labels)] = v
+	r.mu.Unlock()
+}
+
+func renderLabels(labels []string) string {
 	var b strings.Builder
 	for i := 0; i+1 < len(labels); i += 2 {
 		if b.Len() > 0 {
@@ -42,12 +64,7 @@ func (r *Registry) Add(name string, v float64, labels ...string) {
 		}
 		fmt.Fprintf(&b, "%s=%q", labels[i], labels[i+1])
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.values[name] == nil {
-		r.values[name] = map[string]float64{}
-	}
-	r.values[name][b.String()] += v
+	return b.String()
 }
 
 func (r *Registry) Write(w io.Writer) {
@@ -62,7 +79,11 @@ func (r *Registry) Write(w io.Writer) {
 		if h := r.help[n]; h != "" {
 			fmt.Fprintf(w, "# HELP %s %s\n", n, h)
 		}
-		fmt.Fprintf(w, "# TYPE %s counter\n", n)
+		typ := "counter"
+		if r.gauges[n] {
+			typ = "gauge"
+		}
+		fmt.Fprintf(w, "# TYPE %s %s\n", n, typ)
 		keys := make([]string, 0, len(r.values[n]))
 		for k := range r.values[n] {
 			keys = append(keys, k)

@@ -85,6 +85,18 @@ type ContentItem struct {
 	CreatedAt      time.Time
 }
 
+type Credential struct {
+	AccountID        int64
+	Provider         string
+	Ciphertext       []byte
+	Nonce            []byte
+	Scopes           *string
+	ExpiresAt        *time.Time
+	RefreshExpiresAt *time.Time
+	UpdatedAt        time.Time
+	LastError        *string
+}
+
 type Draft struct {
 	ID                  int64
 	CampaignID          int64

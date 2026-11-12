@@ -20,6 +20,7 @@ import (
 	"github.com/lioilsources/promohub/internal/ifttt"
 	"github.com/lioilsources/promohub/internal/metrics"
 	"github.com/lioilsources/promohub/internal/notify"
+	"github.com/lioilsources/promohub/internal/oauth"
 	"github.com/lioilsources/promohub/internal/publish"
 	"github.com/lioilsources/promohub/internal/rules"
 	"github.com/lioilsources/promohub/internal/store"
@@ -43,18 +44,20 @@ type Hub struct {
 	now      func() time.Time
 	rand     func() float64
 
-	collectors map[string]collectors.Collector // platform → read adapter
-	publishers map[string]publish.Publisher    // platform → API publisher
-	accounts   map[int64]config.Account        // accounts.id → account
-	ownHosts   []string
-	llm        *composer.LLM
-	bot        *tgbot.Client // nil: no approvals, so nothing is published
-	admins     []int64
-	after      func(time.Duration, func()) // time.AfterFunc, replaceable in tests
-	kickMu     sync.Mutex
-	kicked     map[string]time.Time
-	jobs       map[jobKey]job
-	terms      []string
+	collectors     map[string]collectors.Collector // platform → read adapter
+	publishers     map[string]publish.Publisher    // platform → API publisher
+	accounts       map[int64]config.Account        // accounts.id → account
+	ownHosts       []string
+	llm            *composer.LLM
+	bot            *tgbot.Client // nil: no approvals, so nothing is published
+	admins         []int64
+	after          func(time.Duration, func()) // time.AfterFunc, replaceable in tests
+	kickMu         sync.Mutex
+	kicked         map[string]time.Time
+	oauth          *oauth.Store // nil without PROMOHUB_SECRET_KEY
+	lastTokenCheck time.Time
+	jobs           map[jobKey]job
+	terms          []string
 
 	accountIDs map[string]int64 // "platform:handle" → accounts.id
 	appIDs     map[string]int64 // slug → apps.id
@@ -81,6 +84,7 @@ type Deps struct {
 	Bot    *tgbot.Client
 	Admins []int64
 	LLM    *composer.LLM
+	OAuth  *oauth.Store
 }
 
 func New(d Deps) *Hub {
@@ -90,6 +94,7 @@ func New(d Deps) *Hub {
 		collectors: map[string]collectors.Collector{}, jobs: map[jobKey]job{}, terms: searchTerms(d.Files),
 		publishers: map[string]publish.Publisher{}, accounts: map[int64]config.Account{}, ownHosts: composer.OwnHosts(d.Files.Apps),
 		llm: d.LLM, bot: d.Bot, admins: d.Admins, kicked: map[string]time.Time{},
+		oauth:       d.OAuth,
 		after:       func(d time.Duration, f func()) { time.AfterFunc(d, f) },
 		wakePublish: make(chan struct{}, 1),
 		accountIDs:  map[string]int64{}, appIDs: map[string]int64{},
@@ -152,6 +157,7 @@ func nudge(c chan struct{}) {
 func (h *Hub) Run(ctx context.Context) {
 	go h.loop(ctx, "runs", h.wakeRuns, h.processPendingRuns)
 	go h.loop(ctx, "collect", nil, h.collectDue)
+	go h.loop(ctx, "tokens", nil, h.checkTokens)
 	if h.bot != nil {
 		if err := h.recoverStranded(ctx); err != nil {
 			h.log.Error("recover stranded drafts", "err", err)

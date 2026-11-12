@@ -32,3 +32,12 @@ Implementace je `internal/platform.ExternalID`. Stejné ID dávají API, Apify, 
 | X | ID statusu | |
 | TikTok | video ID | |
 | Reddit | base36 ID postu | |
+
+## Vlna 3 — OAuth a Meta
+
+| Platforma | Datum | Endpointy | Přihlášení | Zdroj | Rozdíl proti plánu / rozhodnutí |
+|---|---|---|---|---|---|
+| Instagram | 2026-11-12 | `graph.instagram.com/v24.0`: `/me`, `/me/media`, `/{media}/insights` (`views,reach,saved,shares`), `/{media}/comments`, `/me/media` → `/me/media_publish` | OAuth Instagram Login: krátký token → 60denní, refresh přes `ig_refresh_token` | dok | Zmínky (@tag) API bez webhooků nedává, inbound jsou jen komentáře. Text bez média nejde (Reject). Insights se čtou jen pro 10 nejnovějších postů. |
+| Threads | 2026-11-12 | `graph.threads.net/v1.0`: `/me/threads`, `/me/threads_insights` (`followers_count`), `/{id}/insights`, `/me/mentions`, `/{id}/replies`, `/me/threads` → `/me/threads_publish` | OAuth Threads: 60denní token, `th_refresh_token` | dok | Textový post nese `link_attachment`. `REPOST_FACADE` se přeskakuje. `keyword_search` zatím ne (malá kvóta). |
+| Facebook Page | 2026-11-12 | `graph.facebook.com/v24.0`: `/{page}` (`followers_count,fan_count`), `/{page}/posts`, `/{post}/comments`, publikace `/{page}/feed` a `/{page}/photos` | Facebook Login → dlouhodobý user token → page token (neexpiruje) | dok | Výchozí publikace zůstává IFTTT: v Development módu posty aplikace vidí jen role aplikace. Cesta `api` je připravená pro Live. |
+| OAuth obecně | 2026-11-12 | `/oauth/{platform}/start`, `/callback`, `/deauthorize` | `state` podepsaný HMAC, platnost 10 min | — | Tokeny jsou šifrované AES-256-GCM s AAD na účet. Refresh se dělá líně při použití a jednou za 6 h; varování `account.auth_expiring` max. 1× denně. |

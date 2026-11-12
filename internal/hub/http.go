@@ -30,6 +30,10 @@ func (h *Hub) Handler() http.Handler {
 	mux.Handle("POST /webhooks/ifttt", iftttLimit.wrap(http.HandlerFunc(h.iftttWebhook)))
 	mux.Handle("POST /webhooks/ifttt/{event}", iftttLimit.wrap(http.HandlerFunc(h.iftttWebhook)))
 	mux.Handle("GET /media/{token}", newLimiter(120, time.Minute).wrap(http.HandlerFunc(h.serveMedia)))
+	oauthLimit := newLimiter(30, time.Minute)
+	mux.Handle("GET /oauth/{platform}/start", oauthLimit.wrap(http.HandlerFunc(h.oauthStart)))
+	mux.Handle("GET /oauth/{platform}/callback", oauthLimit.wrap(http.HandlerFunc(h.oauthCallback)))
+	mux.Handle("/oauth/{platform}/deauthorize", oauthLimit.wrap(http.HandlerFunc(h.oauthDeauthorize)))
 	return h.logRequests(mux)
 }
 
