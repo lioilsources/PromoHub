@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
 
 	"github.com/lioilsources/promohub/internal/collectors"
@@ -30,8 +31,9 @@ import (
 const SecretSuffix = "TOKEN"
 
 type Adapter struct {
-	HTTP *http.Client
-	Base string // overrides https://<instance> in tests
+	HTTP      *http.Client
+	Base      string        // overrides https://<instance> in tests
+	PollEvery time.Duration // media processing poll (default 2 s)
 
 	mu  sync.Mutex
 	ids map[string]string // account key → my account ID

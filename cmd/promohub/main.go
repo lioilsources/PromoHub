@@ -6,6 +6,7 @@
 //	promohub check        validate CONFIG_DIR (apps/accounts/rules.yaml) and exit
 //	promohub accounts     table of accounts, read/publish paths and collector state
 //	promohub probe a:b    run one read adapter pass against the real API, print JSON, no DB
+//	promohub media import --name f.mp4 < f.mp4   store a file for /post media=ID
 //	promohub healthcheck  GET /healthz on LISTEN_ADDR (for the container HEALTHCHECK)
 package main
 
@@ -17,18 +18,21 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/lioilsources/promohub/internal/apify"
 	"github.com/lioilsources/promohub/internal/collectors/apifysrc"
+	"github.com/lioilsources/promohub/internal/composer"
 	"github.com/lioilsources/promohub/internal/config"
 	"github.com/lioilsources/promohub/internal/hub"
 	"github.com/lioilsources/promohub/internal/ifttt"
 	"github.com/lioilsources/promohub/internal/notify"
 	"github.com/lioilsources/promohub/internal/rules"
 	"github.com/lioilsources/promohub/internal/store"
+	"github.com/lioilsources/promohub/internal/tgbot"
 )
 
 var version = "dev"
@@ -52,10 +56,12 @@ func main() {
 		err = accounts()
 	case "probe":
 		err = probe(os.Args[2:])
+	case "media":
+		err = mediaCmd(os.Args[2:])
 	case "version":
 		fmt.Println(version)
 	default:
-		err = fmt.Errorf("unknown command %q (serve|migrate|check|accounts|probe|healthcheck|version)", cmd)
+		err = fmt.Errorf("unknown command %q (serve|migrate|check|accounts|probe|media|healthcheck|version)", cmd)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "promohub:", err)
@@ -121,6 +127,24 @@ func serve() error {
 		}
 	}
 
+	admins, err := tgbot.ParseIDs(env.TelegramAdminIDs)
+	if err != nil {
+		return err
+	}
+	var bot *tgbot.Client
+	if len(admins) > 0 {
+		if env.TelegramBotToken == "" {
+			return fmt.Errorf("TELEGRAM_ADMIN_IDS is set but TELEGRAM_BOT_TOKEN is not")
+		}
+		bot = &tgbot.Client{Token: env.TelegramBotToken}
+	}
+	var llm *composer.LLM
+	if env.LLMBaseURL != "" {
+		voice, _ := os.ReadFile(filepath.Join(env.ConfigDir, "voice.md"))
+		llm = &composer.LLM{BaseURL: env.LLMBaseURL, Model: env.LLMModel, Key: env.LLMKey, Voice: string(voice)}
+	}
+	hc := &http.Client{Timeout: 60 * time.Second}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -138,7 +162,11 @@ func serve() error {
 		Apify:      apify.New(env.ApifyToken),
 		IFTTT:      ifttt.NewClient(env.IFTTTKey),
 		Telegram:   &notify.Telegram{Token: env.TelegramBotToken},
-		Collectors: readAdapters(&http.Client{Timeout: 30 * time.Second}),
+		Collectors: readAdapters(hc),
+		Publishers: publishers(hc),
+		Bot:        bot,
+		Admins:     admins,
+		LLM:        llm,
 	})
 	if err := h.SyncConfig(ctx); err != nil {
 		return err

@@ -74,3 +74,30 @@ func redact(err error) error {
 	}
 	return err
 }
+
+// TriggerValues fires the classic Webhooks trigger ("Receive a web request") with value1–3,
+// which every action can use as ingredients without filter code. Publish applets read
+// Value1 = text, Value2 = link, Value3 = image URL.
+func (c *Client) TriggerValues(ctx context.Context, event, v1, v2, v3 string) error {
+	if c.Key == "" {
+		return errors.New("ifttt: IFTTT_KEY is not set")
+	}
+	b, _ := json.Marshal(map[string]string{"value1": v1, "value2": v2, "value3": v3})
+	u := c.BaseURL + "/trigger/" + url.PathEscape(event) + "/with/key/" + url.PathEscape(c.Key)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(b))
+	if err != nil {
+		return redact(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return redact(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return &StatusError{Code: resp.StatusCode, Body: strings.ReplaceAll(strings.TrimSpace(string(body)), c.Key, "***")}
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	return nil
+}

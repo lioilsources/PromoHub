@@ -10,6 +10,7 @@ services:
     env_file: ./promohub/.env
     volumes:
       - ./promohub/config:/config:ro    # apps.yaml, accounts.yaml, rules.yaml
+      - promohub-media:/data/media     # uploads served at /media/{token}
     depends_on:
       promohub-db:
         condition: service_healthy
@@ -40,6 +41,7 @@ services:
 
 volumes:
   promohub-db:
+  promohub-media:
 
 networks:
   web:

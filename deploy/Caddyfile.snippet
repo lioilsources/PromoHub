@@ -1,7 +1,8 @@
 # promo.ol1n.com is exposed through the Cloudflare Tunnel → Caddy.
-# Only webhooks and the health check are public; /metrics stays on the internal network.
+# Public: health check, webhooks, media for pull-from-URL platforms (/media/{token}) and the
+# OAuth callbacks (wave 3). /metrics stays on the internal network.
 promo.ol1n.com {
-	@public path /healthz /webhooks/*
+	@public path /healthz /webhooks/* /media/* /oauth/*
 	handle @public {
 		reverse_proxy promohub:8080
 	}
@@ -9,10 +10,16 @@ promo.ol1n.com {
 		respond 404
 	}
 	log {
-		# Webhook secrets travel in the query string; keep them out of access logs.
+		# Webhook secrets travel in the query string and media tokens in the path; keep both out
+		# of access logs. The multiple filter needs Caddy >= 2.8.
 		format filter {
-			request>uri query {
-				replace secret REDACTED
+			request>uri multiple {
+				query {
+					replace secret REDACTED
+					replace code REDACTED
+					replace state REDACTED
+				}
+				regexp "^/media/[^?]+" "/media/REDACTED"
 			}
 		}
 	}

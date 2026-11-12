@@ -36,6 +36,7 @@ type Adapter struct {
 	// AppView and PDS override the hosts in tests ("" = public AppView / account PDS).
 	AppView string
 	PDS     string
+	Now     func() time.Time
 
 	mu       sync.Mutex
 	sessions map[string]*session // account key → session

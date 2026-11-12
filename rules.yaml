@@ -1,7 +1,7 @@
 # Rules: on <trigger> [when <expression>] then <targets>.
 #
 # Triggers: inbound.comment | inbound.review | inbound.mention | inbound.reply |
-#           metric.snapshot | metric.delta | content.new | account.error
+#           metric.snapshot | metric.delta | content.new | account.error | publish.done | publish.failed
 # Variables:
 #   inbound.*  platform, kind, author, text, url, app, rating
 #   metric.*   platform, scope (account|content), url, text, likes, views, reposts, comments,
@@ -9,6 +9,7 @@
 #              hours_since_prev, plus extras such as quotes, bookmarks, saves
 #   content.new platform, url, title, text
 #   account.error platform, account, capability, error, fails (fires once, at the 3rd failure in a row)
+#   publish.*  platform, account, via (api|ifttt|manual), status, url, error
 # Operators: < <= > >= == != and or not ( ) · text matches /re/i · text contains "x" ·
 #            followers crosses [100, 500]
 # Targets: ifttt:<webhooks event> · telegram:<sinks.telegram name> · discord:<sinks.discord name>
@@ -40,6 +41,9 @@ rules:
   # A read adapter keeps failing (expired secret, renamed handle). Enable with a sink:
   # - name: account_error
   #   on: account.error
+  #   then: telegram:urgent
+  # - name: publish_failed
+  #   on: publish.failed
   #   then: telegram:urgent
 
 # Direct sinks, bypassing IFTTT. Uncomment and set the env vars to use telegram:urgent /

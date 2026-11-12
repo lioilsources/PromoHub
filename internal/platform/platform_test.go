@@ -36,3 +36,41 @@ func TestRegistryIsConsistent(t *testing.T) {
 		}
 	}
 }
+
+func TestLength(t *testing.T) {
+	bsky, _ := Lookup("bluesky")
+	x, _ := Lookup("x")
+	masto, _ := Lookup("mastodon")
+	// "👨‍👩‍👧" is one grapheme of five code points.
+	if n := bsky.Length("Hajánek 👨‍👩‍👧"); n != 9 {
+		t.Errorf("bluesky graphemes = %d", n)
+	}
+	if n := masto.Length("see https://olin.now/pass?a=very-long-query-string-indeed"); n != 4+23 {
+		t.Errorf("mastodon url weight = %d", n)
+	}
+	if n := x.Length("ahoj 日本 https://x.co"); n != 5+4+1+23 { // "ahoj ", 日本 at weight 2, the space before the URL
+		t.Errorf("x weighted = %d", n)
+	}
+	long := ""
+	for i := 0; i < 80; i++ {
+		long += "word "
+	}
+	out := bsky.TrimTo(long, "#swypekids")
+	if !bsky.Fits(out) || !hasSuffix(out, "…\n\n#swypekids") {
+		t.Errorf("trim: %d %q", bsky.Length(out), out)
+	}
+}
+
+func hasSuffix(s, suf string) bool { return len(s) >= len(suf) && s[len(s)-len(suf):] == suf }
+
+func TestIntent(t *testing.T) {
+	if got := Intent("hackernews", "", "", "https://olin.now", "Show HN: SwypeKids"); got != "https://news.ycombinator.com/submitlink?t=Show+HN%3A+SwypeKids&u=https%3A%2F%2Folin.now" {
+		t.Error(got)
+	}
+	if got := Intent("mastodon", "mastodon.social", "ahoj", "", ""); got != "https://mastodon.social/share?text=ahoj" {
+		t.Error(got)
+	}
+	if Intent("instagram", "", "a", "", "") != "" {
+		t.Error("instagram has no web compose")
+	}
+}

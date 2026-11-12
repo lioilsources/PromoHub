@@ -25,6 +25,12 @@ type Env struct {
 	IFTTTKey           string // outbound Webhooks key (maker.ifttt.com)
 	IFTTTInboundSecret string // shared secret IFTTT applets put into ?secret=
 	TelegramBotToken   string
+	TelegramAdminIDs   string // comma-separated user IDs allowed to approve; the first gets proposals
+	PublicBaseURL      string // for /media/{token} and OAuth redirects
+	MediaDir           string
+	LLMBaseURL         string // OpenAI-compatible gateway (…/v1); empty = composer v0 only
+	LLMModel           string
+	LLMKey             string
 	LogLevel           string
 	EventMaxAttempts   int
 	RunMaxAttempts     int
@@ -41,6 +47,12 @@ func LoadEnv() (Env, error) {
 		IFTTTKey:           os.Getenv("IFTTT_KEY"),
 		IFTTTInboundSecret: os.Getenv("IFTTT_INBOUND_SECRET"),
 		TelegramBotToken:   os.Getenv("TELEGRAM_BOT_TOKEN"),
+		TelegramAdminIDs:   os.Getenv("TELEGRAM_ADMIN_IDS"),
+		PublicBaseURL:      strings.TrimSuffix(getenv("PUBLIC_BASE_URL", "https://promo.ol1n.com"), "/"),
+		MediaDir:           getenv("MEDIA_DIR", "/data/media"),
+		LLMBaseURL:         os.Getenv("LLM_BASE_URL"),
+		LLMModel:           os.Getenv("LLM_MODEL"),
+		LLMKey:             os.Getenv("LLM_API_KEY"),
 		LogLevel:           getenv("LOG_LEVEL", "info"),
 		EventMaxAttempts:   8,
 		RunMaxAttempts:     5,
@@ -83,6 +95,7 @@ type App struct {
 	AppStoreID  string            `yaml:"appstore_id"`
 	PlayPackage string            `yaml:"play_package"`
 	Keywords    []string          `yaml:"keywords"` // extra words that attribute a mention to this app
+	Hashtags    []string          `yaml:"hashtags"` // added to posts on hashtag platforms (Mastodon, Bluesky, Instagram, …)
 	Links       map[string]string `yaml:"links"`
 }
 

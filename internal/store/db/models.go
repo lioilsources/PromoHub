@@ -45,6 +45,21 @@ type App struct {
 	Links       []byte
 }
 
+type Campaign struct {
+	ID                  int64
+	AppID               *int64
+	SourceContentItemID *int64
+	Lang                string
+	Title               *string
+	Body                string
+	Link                *string
+	Media               []byte
+	Status              string
+	TgChatID            *int64
+	TgMessageID         *int64
+	CreatedAt           time.Time
+}
+
 type CollectorState struct {
 	AccountID  int64
 	Capability string
@@ -68,6 +83,28 @@ type ContentItem struct {
 	Media          []byte
 	PublishedAt    *time.Time
 	CreatedAt      time.Time
+}
+
+type Draft struct {
+	ID                  int64
+	CampaignID          int64
+	AccountID           int64
+	Via                 string
+	Text                string
+	Extra               []byte
+	Status              string
+	ScheduledAt         *time.Time
+	ApprovedAt          *time.Time
+	AttemptKey          *string
+	Attempts            int32
+	PublishedAt         *time.Time
+	PublishedExternalID *string
+	PublishedUrl        *string
+	ContentItemID       *int64
+	Error               *string
+	TgChatID            *int64
+	TgMessageID         *int64
+	UpdatedAt           time.Time
 }
 
 type Event struct {
@@ -98,6 +135,28 @@ type InboundItem struct {
 	CollectedAt   time.Time
 	Sentiment     *string
 	Handled       bool
+}
+
+type Kv struct {
+	Key       string
+	Value     string
+	UpdatedAt time.Time
+}
+
+type MediaAsset struct {
+	ID         int64
+	Token      string
+	Path       string
+	Name       string
+	Mime       string
+	Bytes      int64
+	Sha256     string
+	Width      *int32
+	Height     *int32
+	DurationMs *int32
+	Alt        *string
+	CreatedAt  time.Time
+	ExpiresAt  time.Time
 }
 
 type MetricSnapshot struct {

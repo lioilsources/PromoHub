@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,6 +29,7 @@ func (h *Hub) Handler() http.Handler {
 	mux.Handle("POST /webhooks/apify", apifyLimit.wrap(http.HandlerFunc(h.apifyWebhook)))
 	mux.Handle("POST /webhooks/ifttt", iftttLimit.wrap(http.HandlerFunc(h.iftttWebhook)))
 	mux.Handle("POST /webhooks/ifttt/{event}", iftttLimit.wrap(http.HandlerFunc(h.iftttWebhook)))
+	mux.Handle("GET /media/{token}", newLimiter(120, time.Minute).wrap(http.HandlerFunc(h.serveMedia)))
 	return h.logRequests(mux)
 }
 
@@ -146,7 +149,10 @@ func (h *Hub) iftttContent(w http.ResponseWriter, r *http.Request, platform stri
 	}
 	ctx := r.Context()
 	acctID := h.firstAccount(platform)
-	var res struct{ inserted bool }
+	var res struct {
+		inserted bool
+		fresh    IngestResult
+	}
 	err := h.store.Tx(ctx, func(q *db.Queries) error {
 		row, err := q.UpsertContentItem(ctx, db.UpsertContentItemParams{
 			AccountID: acctID, AppID: h.appIDFor(in.Title + " " + in.Body), SourcePlatform: platform,
@@ -160,6 +166,9 @@ func (h *Hub) iftttContent(w http.ResponseWriter, r *http.Request, platform stri
 		if !row.Inserted {
 			return nil
 		}
+		if platform == "youtube" {
+			res.fresh.Fresh = append(res.fresh.Fresh, freshPost{row.ID, platform, firstLine(in.Title, in.Body), in.URL})
+		}
 		v := rules.Vars{Num: map[string]float64{}, Str: map[string]string{"platform": platform, "url": in.URL, "title": in.Title, "text": in.Body}}
 		_, err = h.fire(ctx, q, rules.OnContentNew, v, map[string]any{"platform": platform, "url": in.URL, "title": firstLine(in.Title, in.Body)})
 		return err
@@ -169,6 +178,7 @@ func (h *Hub) iftttContent(w http.ResponseWriter, r *http.Request, platform stri
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db"})
 		return
 	}
+	h.afterIngest(ctx, res.fresh)
 	nudge(h.wakeEvents)
 	status := "duplicate"
 	if res.inserted {
@@ -221,7 +231,11 @@ func (h *Hub) logRequests(next http.Handler) http.Handler {
 		}
 		h.metrics.Inc("promohub_http_requests_total", "route", route, "code", strconv.Itoa(sw.code))
 		if r.URL.Path != "/healthz" && r.URL.Path != "/metrics" {
-			h.log.Info("http", "method", r.Method, "path", r.URL.Path, "code", sw.code, "dur_ms", time.Since(start).Milliseconds())
+			path := r.URL.Path
+			if strings.HasPrefix(path, "/media/") {
+				path = "/media/…" // the token is the key
+			}
+			h.log.Info("http", "method", r.Method, "path", path, "code", sw.code, "dur_ms", time.Since(start).Milliseconds())
 		}
 	})
 }
@@ -262,4 +276,25 @@ func (l *limiter) wrap(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// serveMedia hands out an uploaded file to platforms that pull media from a URL. The token is
+// the only key; expired or unknown tokens look the same (404).
+func (h *Hub) serveMedia(w http.ResponseWriter, r *http.Request) {
+	a, err := h.store.MediaByToken(r.Context(), db.MediaByTokenParams{Token: r.PathValue("token"), ExpiresAt: h.now()})
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	f, err := os.Open(a.Path)
+	if err != nil {
+		h.log.Error("media file missing", "media", a.ID, "err", err)
+		http.NotFound(w, r)
+		return
+	}
+	defer f.Close()
+	w.Header().Set("Content-Type", a.Mime)
+	w.Header().Set("Cache-Control", "private, max-age=3600")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	http.ServeContent(w, r, a.Name, a.CreatedAt, f)
 }

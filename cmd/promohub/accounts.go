@@ -19,6 +19,7 @@ import (
 	"github.com/lioilsources/promohub/internal/platforms/mastodon"
 	"github.com/lioilsources/promohub/internal/platforms/telegram"
 	"github.com/lioilsources/promohub/internal/platforms/youtube"
+	"github.com/lioilsources/promohub/internal/publish"
 	"github.com/lioilsources/promohub/internal/store"
 )
 
@@ -200,4 +201,14 @@ func oneLine(s string, n int) string {
 		return string(r[:n]) + "…"
 	}
 	return s
+}
+
+// publishers are the official-API publish paths (wave 2).
+func publishers(hc *http.Client) []publish.Publisher {
+	return []publish.Publisher{
+		bluesky.Publisher{Adapter: bluesky.New(hc)},
+		mastodon.Publisher{Adapter: mastodon.New(hc)},
+		telegram.Publisher{Adapter: telegram.New(hc)},
+		discord.Publisher{Adapter: discord.New(hc)},
+	}
 }
