@@ -163,8 +163,8 @@ SELECT * FROM collector_state ORDER BY account_id, capability;
 SELECT * FROM accounts ORDER BY id;
 
 -- name: InsertCampaign :one
-INSERT INTO campaigns (app_id, source_content_item_id, lang, title, body, link, media)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO campaigns (app_id, source_content_item_id, lang, title, body, link, media, llm_status)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING *;
 
 -- name: GetCampaign :one
@@ -322,3 +322,9 @@ LEFT JOIN LATERAL (
 ) s ON true
 WHERE ci.account_id IS NOT NULL AND ci.published_at >= $1
 GROUP BY ci.account_id;
+
+-- name: PendingLLMCampaigns :many
+SELECT * FROM campaigns WHERE llm_status = 'pending' ORDER BY id;
+
+-- name: SetCampaignLLMStatus :exec
+UPDATE campaigns SET llm_status = $2 WHERE id = $1;

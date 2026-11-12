@@ -150,6 +150,10 @@ func serve() error {
 		llm = &composer.LLM{BaseURL: env.LLMBaseURL, Model: env.LLMModel, Key: env.LLMKey, Voice: string(voice)}
 	}
 	hc := &http.Client{Timeout: 60 * time.Second}
+	window, err := llmWindow(env, llm)
+	if err != nil {
+		return err
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -183,6 +187,7 @@ func serve() error {
 		Collectors: readAdapters(hc, tokens),
 		Publishers: publishers(hc, tokens),
 		OAuth:      oauthStore,
+		Window:     window,
 		Bot:        bot,
 		Admins:     admins,
 		LLM:        llm,

@@ -58,6 +58,7 @@ type Campaign struct {
 	TgChatID            *int64
 	TgMessageID         *int64
 	CreatedAt           time.Time
+	LlmStatus           string
 }
 
 type CollectorState struct {
