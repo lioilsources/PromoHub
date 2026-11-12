@@ -74,3 +74,13 @@ func TestIntent(t *testing.T) {
 		t.Error("instagram has no web compose")
 	}
 }
+
+func TestCheckVideo(t *testing.T) {
+	b, _ := Lookup("bluesky")
+	if b.CheckVideo(50<<20, 60_000) != "" || b.CheckVideo(50<<20, 200_000) == "" || b.CheckVideo(150<<20, 1000) == "" {
+		t.Fatal("bluesky limits")
+	}
+	if x, _ := Lookup("x"); x.CheckVideo(1, 1) == "" {
+		t.Fatal("x has no video path")
+	}
+}

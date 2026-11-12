@@ -1,7 +1,6 @@
 package telegram
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -46,7 +45,7 @@ func (p Publisher) Publish(ctx context.Context, acct config.Account, post publis
 	chat := ChatID(acct)
 	var img *publish.Media
 	for i := range post.Media {
-		if post.Media[i].IsImage() {
+		if post.Media[i].IsImage() || post.Media[i].IsVideo() {
 			img = &post.Media[i]
 			break
 		}
@@ -58,7 +57,7 @@ func (p Publisher) Publish(ctx context.Context, acct config.Account, post publis
 		if utf8.RuneCountInString(text) <= captionMax {
 			caption, text = text, ""
 		}
-		if err := sendPhoto(ctx, c, chat, *img, caption, &res); err != nil {
+		if err := sendFile(ctx, c, chat, *img, caption, &res); err != nil {
 			return publish.Result{}, publish.Reject(err)
 		}
 	}
@@ -79,27 +78,40 @@ func (p Publisher) Publish(ctx context.Context, acct config.Account, post publis
 	return publish.Result{ExternalID: id, URL: u}, nil
 }
 
-func sendPhoto(ctx context.Context, c *httpx.Client, chat string, m publish.Media, caption string, out *message) error {
+// sendFile uploads a photo (sendPhoto) or a video (sendVideo, bots may send up to 50 MB).
+func sendFile(ctx context.Context, c *httpx.Client, chat string, m publish.Media, caption string, out *message) error {
+	method, field := "/sendPhoto", "photo"
+	if m.IsVideo() {
+		method, field = "/sendVideo", "video"
+	}
 	f, err := os.Open(m.Path)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	var buf bytes.Buffer
-	w := multipart.NewWriter(&buf)
-	_ = w.WriteField("chat_id", chat)
-	if caption != "" {
-		_ = w.WriteField("caption", caption)
-	}
-	part, err := w.CreateFormFile("photo", filepath.Base(m.Path))
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(part, f); err != nil {
-		return err
-	}
-	w.Close()
+	pr, pw := io.Pipe()
+	w := multipart.NewWriter(pw)
+	go func() {
+		err := w.WriteField("chat_id", chat)
+		if err == nil && caption != "" {
+			err = w.WriteField("caption", caption)
+		}
+		if err == nil && m.IsVideo() {
+			err = w.WriteField("supports_streaming", "true")
+		}
+		var part io.Writer
+		if err == nil {
+			part, err = w.CreateFormFile(field, filepath.Base(m.Path))
+		}
+		if err == nil {
+			_, err = io.Copy(part, f)
+		}
+		if err == nil {
+			err = w.Close()
+		}
+		pw.CloseWithError(err)
+	}()
 	up := *c
 	up.Header = http.Header{"Content-Type": {w.FormDataContentType()}}
-	return up.Do(ctx, http.MethodPost, "/sendPhoto", nil, &buf, out)
+	return up.Do(ctx, http.MethodPost, method, nil, pr, out)
 }

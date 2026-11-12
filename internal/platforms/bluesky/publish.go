@@ -1,7 +1,6 @@
 package bluesky
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -18,7 +17,10 @@ import (
 	"github.com/lioilsources/promohub/internal/publish"
 )
 
-const maxBlob = 1_000_000 // bytes; the PDS rejects larger images
+const (
+	maxBlob  = 1_000_000 // bytes; the PDS rejects larger images
+	maxVideo = 100 << 20
+)
 
 // PublishReady: publishing always needs the app password.
 func (a *Adapter) PublishReady(acct config.Account) error { return a.Ready(acct, "inbound") }
@@ -59,7 +61,7 @@ func (a *Adapter) Publish(ctx context.Context, acct config.Account, post publish
 		if !m.IsImage() || len(images) == 4 {
 			continue
 		}
-		blob, err := a.uploadBlob(ctx, c, m.Path, m.Mime)
+		blob, err := a.uploadBlob(ctx, c, m.Path, m.Mime, maxBlob)
 		if err != nil {
 			return publish.Result{}, publish.Reject(fmt.Errorf("upload %s: %w", m.Path, err))
 		}
@@ -69,10 +71,26 @@ func (a *Adapter) Publish(ctx context.Context, acct config.Account, post publish
 		}
 		images = append(images, img)
 	}
+	var vid map[string]any
+	for _, m := range post.Media {
+		if m.IsVideo() && len(images) == 0 {
+			blob, err := a.uploadBlob(ctx, c, m.Path, m.Mime, maxVideo)
+			if err != nil {
+				return publish.Result{}, publish.Reject(fmt.Errorf("upload %s: %w", m.Path, err))
+			}
+			vid = map[string]any{"$type": "app.bsky.embed.video", "video": blob, "alt": m.Alt}
+			if m.Width > 0 && m.Height > 0 {
+				vid["aspectRatio"] = map[string]int{"width": m.Width, "height": m.Height}
+			}
+			break
+		}
+	}
 	link := post.Extra["link"]
 	switch {
 	case len(images) > 0:
 		rec["embed"] = map[string]any{"$type": "app.bsky.embed.images", "images": images}
+	case vid != nil:
+		rec["embed"] = vid
 	case link != "":
 		rec["embed"] = a.linkCard(ctx, c, link)
 	}
@@ -89,13 +107,18 @@ func (a *Adapter) Publish(ctx context.Context, acct config.Account, post publish
 	return publish.Result{ExternalID: rkey, URL: PostURL(s.Handle, rkey)}, nil
 }
 
-func (a *Adapter) uploadBlob(ctx context.Context, c *httpx.Client, path, mime string) (json.RawMessage, error) {
-	b, err := os.ReadFile(path)
+func (a *Adapter) uploadBlob(ctx context.Context, c *httpx.Client, path, mime string, limit int64) (json.RawMessage, error) {
+	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	if len(b) > maxBlob {
-		return nil, fmt.Errorf("image is %d bytes, Bluesky takes at most %d", len(b), maxBlob)
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if st.Size() > limit {
+		return nil, fmt.Errorf("file is %d bytes, Bluesky takes at most %d", st.Size(), limit)
 	}
 	up := *c
 	up.Header = c.Header.Clone()
@@ -103,7 +126,7 @@ func (a *Adapter) uploadBlob(ctx context.Context, c *httpx.Client, path, mime st
 	var res struct {
 		Blob json.RawMessage `json:"blob"`
 	}
-	if err := up.Do(ctx, http.MethodPost, "/xrpc/com.atproto.repo.uploadBlob", nil, bytes.NewReader(b), &res); err != nil {
+	if err := up.Do(ctx, http.MethodPost, "/xrpc/com.atproto.repo.uploadBlob", nil, f, &res); err != nil {
 		return nil, err
 	}
 	return res.Blob, nil
@@ -144,7 +167,7 @@ func (a *Adapter) uploadRemote(ctx context.Context, c *httpx.Client, u string) (
 		return nil, err
 	}
 	tmp.Close()
-	return a.uploadBlob(ctx, c, tmp.Name(), mime)
+	return a.uploadBlob(ctx, c, tmp.Name(), mime, maxBlob)
 }
 
 type ogTags struct{ title, description, image string }

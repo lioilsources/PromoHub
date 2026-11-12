@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"fmt"
 	"net/url"
 	"regexp"
 	"strings"
@@ -130,4 +131,39 @@ func (s Spec) TrimTo(body, tail string) string {
 		}
 	}
 	return tail
+}
+
+// video limits by platform (official docs, 2026-11-12; docs/PLATFORMS.md). IFTTT applets only
+// take an image URL, so ifttt/manual platforms are absent.
+var video = map[string][2]int{ // MB, seconds
+	"bluesky":   {100, 180},
+	"mastodon":  {99, 0},
+	"instagram": {300, 900},
+	"threads":   {1000, 300},
+	"tiktok":    {300, 600}, // the hub caps uploads at 300 MB
+	"youtube":   {300, 0},
+	"telegram":  {50, 0},
+	"discord":   {10, 0},
+}
+
+func init() {
+	for i := range all {
+		if v, ok := video[all[i].Name]; ok {
+			all[i].VideoMB, all[i].VideoSeconds = v[0], v[1]
+			byName[all[i].Name] = all[i]
+		}
+	}
+}
+
+// CheckVideo explains why a video cannot go to the platform ("" = fine).
+func (s Spec) CheckVideo(bytes int64, durationMs int) string {
+	switch {
+	case s.VideoMB == 0:
+		return s.Title + " video přes hub nebere"
+	case bytes > int64(s.VideoMB)<<20:
+		return fmt.Sprintf("%s bere video do %d MB (má %d MB)", s.Title, s.VideoMB, bytes>>20)
+	case s.VideoSeconds > 0 && durationMs > s.VideoSeconds*1000:
+		return fmt.Sprintf("%s bere video do %d s (má %d s)", s.Title, s.VideoSeconds, durationMs/1000)
+	}
+	return ""
 }

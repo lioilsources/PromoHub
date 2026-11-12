@@ -1,7 +1,6 @@
 package mastodon
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -75,30 +74,34 @@ func (p Publisher) upload(ctx context.Context, c *httpx.Client, m publish.Media)
 		return "", err
 	}
 	defer f.Close()
-	var buf bytes.Buffer
-	w := multipart.NewWriter(&buf)
-	h := textproto.MIMEHeader{}
-	h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename=%q`, filepath.Base(m.Path)))
-	h.Set("Content-Type", m.Mime)
-	part, err := w.CreatePart(h)
-	if err != nil {
-		return "", err
-	}
-	if _, err := io.Copy(part, f); err != nil {
-		return "", err
-	}
-	if m.Alt != "" {
-		_ = w.WriteField("description", m.Alt)
-	}
-	w.Close()
+	// Stream the multipart body: videos do not fit the container's memory limit.
+	pr, pw := io.Pipe()
+	w := multipart.NewWriter(pw)
+	go func() {
+		h := textproto.MIMEHeader{}
+		h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename=%q`, filepath.Base(m.Path)))
+		h.Set("Content-Type", m.Mime)
+		part, err := w.CreatePart(h)
+		if err == nil {
+			_, err = io.Copy(part, f)
+		}
+		if err == nil && m.Alt != "" {
+			err = w.WriteField("description", m.Alt)
+		}
+		if err == nil {
+			err = w.Close()
+		}
+		pw.CloseWithError(err)
+	}()
 	up := *c
 	up.Header = c.Header.Clone()
 	up.Header.Set("Content-Type", w.FormDataContentType())
 	var res media
-	if err := up.Do(ctx, http.MethodPost, "/api/v2/media", nil, &buf, &res); err != nil {
+	if err := up.Do(ctx, http.MethodPost, "/api/v2/media", nil, pr, &res); err != nil {
+		pr.CloseWithError(err)
 		return "", err
 	}
-	for i := 0; res.URL == nil && i < 30; i++ {
+	for i := 0; res.URL == nil && i < 90; i++ { // videos take a while
 		select {
 		case <-ctx.Done():
 			return "", ctx.Err()
