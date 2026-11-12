@@ -6,6 +6,7 @@
 //	promohub check        validate CONFIG_DIR (apps/accounts/rules.yaml) and exit
 //	promohub accounts     table of accounts, read/publish paths and collector state
 //	promohub probe a:b    run one read adapter pass against the real API, print JSON, no DB
+//	promohub connect a:b  print the OAuth link for an account (needs PROMOHUB_SECRET_KEY)
 //	promohub media import --name f.mp4 < f.mp4   store a file for /post media=ID
 //	promohub healthcheck  GET /healthz on LISTEN_ADDR (for the container HEALTHCHECK)
 package main
@@ -27,12 +28,15 @@ import (
 	"github.com/lioilsources/promohub/internal/collectors/apifysrc"
 	"github.com/lioilsources/promohub/internal/composer"
 	"github.com/lioilsources/promohub/internal/config"
+	"github.com/lioilsources/promohub/internal/creds"
 	"github.com/lioilsources/promohub/internal/hub"
 	"github.com/lioilsources/promohub/internal/ifttt"
 	"github.com/lioilsources/promohub/internal/notify"
+	"github.com/lioilsources/promohub/internal/oauth"
 	"github.com/lioilsources/promohub/internal/rules"
 	"github.com/lioilsources/promohub/internal/store"
 	"github.com/lioilsources/promohub/internal/tgbot"
+	"github.com/lioilsources/promohub/internal/vault"
 )
 
 var version = "dev"
@@ -56,12 +60,14 @@ func main() {
 		err = accounts()
 	case "probe":
 		err = probe(os.Args[2:])
+	case "connect":
+		err = connect(os.Args[2:])
 	case "media":
 		err = mediaCmd(os.Args[2:])
 	case "version":
 		fmt.Println(version)
 	default:
-		err = fmt.Errorf("unknown command %q (serve|migrate|check|accounts|probe|media|healthcheck|version)", cmd)
+		err = fmt.Errorf("unknown command %q (serve|migrate|check|accounts|probe|connect|media|healthcheck|version)", cmd)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "promohub:", err)
@@ -156,14 +162,27 @@ func serve() error {
 		return err
 	}
 	defer st.Close()
+	var oauthStore *oauth.Store
+	var tokens creds.TokenSource
+	if key := os.Getenv("PROMOHUB_SECRET_KEY"); key != "" {
+		v, err := vault.New(key)
+		if err != nil {
+			return err
+		}
+		oauthStore = &oauth.Store{Q: st.Queries, Vault: v, Clients: oauthClients(env.PublicBaseURL, hc)}
+		tokens = oauthStore
+	} else {
+		log.Warn("PROMOHUB_SECRET_KEY not set: OAuth accounts (Instagram, Threads, Facebook, …) stay disconnected")
+	}
 
 	h := hub.New(hub.Deps{
 		Log: log, Env: env, Files: files, Rules: eng, Store: st,
 		Apify:      apify.New(env.ApifyToken),
 		IFTTT:      ifttt.NewClient(env.IFTTTKey),
 		Telegram:   &notify.Telegram{Token: env.TelegramBotToken},
-		Collectors: readAdapters(hc),
-		Publishers: publishers(hc),
+		Collectors: readAdapters(hc, tokens),
+		Publishers: publishers(hc, tokens),
+		OAuth:      oauthStore,
 		Bot:        bot,
 		Admins:     admins,
 		LLM:        llm,

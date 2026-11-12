@@ -283,3 +283,22 @@ DELETE FROM kv WHERE key = $1;
 
 -- name: GetAccount :one
 SELECT * FROM accounts WHERE id = $1;
+
+-- name: PutCredential :exec
+INSERT INTO credentials (account_id, provider, ciphertext, nonce, scopes, expires_at, refresh_expires_at, updated_at, last_error)
+VALUES ($1, $2, $3, $4, $5, $6, $7, now(), NULL)
+ON CONFLICT (account_id) DO UPDATE
+SET provider = EXCLUDED.provider, ciphertext = EXCLUDED.ciphertext, nonce = EXCLUDED.nonce, scopes = EXCLUDED.scopes,
+    expires_at = EXCLUDED.expires_at, refresh_expires_at = EXCLUDED.refresh_expires_at, updated_at = now(), last_error = NULL;
+
+-- name: GetCredential :one
+SELECT * FROM credentials WHERE account_id = $1;
+
+-- name: ListCredentials :many
+SELECT * FROM credentials ORDER BY account_id;
+
+-- name: CredentialError :exec
+UPDATE credentials SET last_error = $2 WHERE account_id = $1;
+
+-- name: AccountByKey :one
+SELECT * FROM accounts WHERE platform = $1 AND handle = $2;

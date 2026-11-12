@@ -263,3 +263,25 @@ Stav draftů:
 SELECT d.id, a.platform, a.handle, d.via, d.status, d.error, d.published_url
 FROM drafts d JOIN accounts a ON a.id = d.account_id ORDER BY d.id DESC LIMIT 20;
 ```
+
+---
+
+## 8. Vlna 3 — OAuth: Instagram, Threads, Facebook Page
+
+1. `PROMOHUB_SECRET_KEY=$(openssl rand -hex 32)` do `.env`. Ztráta klíče znamená nový `/connect` u všech OAuth účtů.
+2. Meta aplikace podle promptu 4 v `Prompts/02-CHROME_PROMPTS.md`.
+   - Do `.env` patří `INSTAGRAM_APP_ID/SECRET`, `THREADS_APP_ID/SECRET` a `FACEBOOK_APP_ID/SECRET`.
+   - Redirect URI jsou `https://promo.ol1n.com/oauth/{instagram|threads|facebook}/callback`.
+3. Odkomentuj účty v `accounts.yaml`. U Facebooku `external_id` = Page ID. Pak `make deploy`.
+4. V Telegramu napiš botovi `/connect instagram:<handle>`, klikni na „Připojit“ a povol přístup. To samé zopakuj pro Threads a Facebook. Odkaz platí 10 minut.
+   - Bez bota: `docker exec promohub promohub connect instagram:<handle>` vypíše odkaz.
+5. `promohub accounts` u nich ukáže `ready`. Collectory se pustí hned po připojení.
+6. Apify task `ig-profile` můžeš smazat (nebo u účtu nastavit `read: apify`, pokud chceš zůstat u scraperu).
+
+Tokeny Instagramu a Threads platí 60 dní. Hub je obnovuje sám, když zbývá míň než 20 dní. Pokud obnova selže nebo zbývá míň než 7 dní, přijde jednou denně zpráva 🔐 a trigger `account.auth_expiring`. Pak stačí znovu `/connect`.
+
+Publikace:
+
+- Instagram potřebuje obrázek nebo video. Médium bere z veřejné `/media/{token}` URL, takže musí fungovat Caddy snippet z vlny 2.
+- Threads publikuje i čistý text a odkaz dá jako link attachment.
+- Facebook zůstává na IFTTT, dokud Meta aplikace není Live.

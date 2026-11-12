@@ -256,6 +256,8 @@ func message(on string, p map[string]any) string {
 		fmt.Fprintf(&b, "[%s] published (%s) %s", s("platform"), s("via"), s("account"))
 	case on == rules.OnPublishFailed:
 		fmt.Fprintf(&b, "[%s] publish %s %s: %s", s("platform"), s("status"), s("account"), truncate(s("error"), 300))
+	case on == rules.OnAuthExpiring:
+		fmt.Fprintf(&b, "[%s] %s login: %s", s("platform"), s("account"), truncate(s("error"), 300))
 	case on == rules.OnAccountError:
 		fmt.Fprintf(&b, "[%s] %s %s failing: %s", s("platform"), s("account"), s("capability"), truncate(s("error"), 300))
 	case on == rules.OnContentNew:
