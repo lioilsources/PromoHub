@@ -72,6 +72,9 @@ func (h *Hub) deliver(ctx context.Context, target string, payload []byte) error 
 		if chat == "" {
 			return fmt.Errorf("sinks.telegram.%s is not configured", name)
 		}
+		if sent, err := h.sendInbound(ctx, chat, payload); sent {
+			return err
+		}
 		return h.telegram.Send(ctx, chat, payloadMessage(payload))
 	case rules.TargetDiscord:
 		hook := h.files.Rules.Sinks.Discord[name]

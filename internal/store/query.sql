@@ -29,8 +29,8 @@ RETURNING id, (xmax = 0)::boolean AS inserted;
 
 -- name: InsertInboundItem :one
 -- Returns no row (pgx.ErrNoRows) when the item was already stored.
-INSERT INTO inbound_items (platform, kind, external_id, content_item_id, app_id, author, text, rating, url, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+INSERT INTO inbound_items (platform, kind, external_id, content_item_id, app_id, author, text, rating, url, created_at, account_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 ON CONFLICT DO NOTHING
 RETURNING id;
 
@@ -302,3 +302,23 @@ UPDATE credentials SET last_error = $2 WHERE account_id = $1;
 
 -- name: AccountByKey :one
 SELECT * FROM accounts WHERE platform = $1 AND handle = $2;
+
+-- name: GetInboundItem :one
+SELECT * FROM inbound_items WHERE id = $1;
+
+-- name: MarkInboundReplied :exec
+UPDATE inbound_items SET replied_at = now(), reply_url = $2, handled = true WHERE id = $1;
+
+-- name: AccountContentStats :many
+-- Posts of each account published since $1 and the mean engagement (likes + reposts + comments)
+-- and views of their latest snapshots.
+SELECT ci.account_id::bigint AS account_id, count(*)::bigint AS posts,
+       COALESCE(avg(COALESCE(s.likes, 0) + COALESCE(s.reposts, 0) + COALESCE(s.comments, 0)), 0)::double precision AS engagement,
+       COALESCE(avg(s.views), 0)::double precision AS views
+FROM content_items ci
+LEFT JOIN LATERAL (
+    SELECT likes, reposts, comments, views FROM metric_snapshots ms
+    WHERE ms.content_item_id = ci.id ORDER BY taken_at DESC LIMIT 1
+) s ON true
+WHERE ci.account_id IS NOT NULL AND ci.published_at >= $1
+GROUP BY ci.account_id;

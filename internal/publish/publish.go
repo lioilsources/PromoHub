@@ -89,3 +89,17 @@ func Classify(err error) Outcome {
 	}
 	return Unknown
 }
+
+// InboundRef identifies the comment or mention a reply answers.
+type InboundRef struct {
+	ExternalID string
+	URL        string
+	Author     string
+}
+
+// Replier answers an inbound item on its platform. Olin writes the text in Telegram, so a
+// reply needs no further approval.
+type Replier interface {
+	Platform() string
+	Reply(ctx context.Context, acct config.Account, to InboundRef, text string) (Result, error)
+}

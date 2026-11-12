@@ -28,7 +28,12 @@ make test-db            # TEST_PG_PORT=55439, když je 55432 obsazený
 - `internal/platforms/<name>` — adaptéry: klient, `Collector`, později `Publisher`. Sdílený HTTP klient je `httpx`.
 - `internal/collectors` — neutrální model (`Batch`, `Snapshot`, `Inbound`) a rozhraní `Collector`. `apifysrc` mapuje Apify datasety.
 - `internal/hub` — webhooky, `Ingest` (jediné místo, které ukládá), plánovač (`collect.go`), outbox.
-- `internal/creds` — statické secrets z env podle `auth_ref`.
+- `internal/creds` — statické secrets z env podle `auth_ref`; `Token`/`TokenSource` pro OAuth.
+- `internal/oauth`, `internal/vault` — OAuth flow, šifrované tokeny (AES-GCM, `PROMOHUB_SECRET_KEY`), refresh.
+- `internal/publish` — model postu, `Publisher`, `Replier`, `Classify` (failed vs unknown).
+- `internal/composer` — texty per účet (v0 deterministický, volitelně LLM).
+- `internal/tgbot`, `internal/hub/bot.go` — schvalovací bot; `internal/hub/publish.go` — stavový automat draftů.
+- `internal/media` — uložení souborů, MP4 sonda, `/media/{token}`.
 - `internal/store` — migrace a sqlc. Po změně `query.sql` spusť `make generate`; vygenerovaný kód needituj.
 
 ## Pravidla
@@ -38,4 +43,4 @@ make test-db            # TEST_PG_PORT=55439, když je 55432 obsazený
 - Testy bez sítě a bez `time.Now`. Klienti mají `Base`/`BaseURL` pro `httptest`, hub má `now` a `rand`.
 - Každé mapování má fixture z reálné odpovědi (zkrácenou, bez tokenů, cizí účty anonymizované).
 - Žádný Python ani Bash skripty, jen Go a Makefile.
-- Nic se nepublikuje bez schválení v Telegramu (vlna 2+).
+- Nic se nepublikuje bez schválení v Telegramu. Draft v `publishing` po pádu → `unknown`, nikdy automatický retry (kromě Mastodonu s `Idempotency-Key`).

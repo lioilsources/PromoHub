@@ -147,6 +147,9 @@ type InboundItem struct {
 	CollectedAt   time.Time
 	Sentiment     *string
 	Handled       bool
+	AccountID     *int64
+	RepliedAt     *time.Time
+	ReplyUrl      *string
 }
 
 type Kv struct {

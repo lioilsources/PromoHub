@@ -53,3 +53,13 @@ Implementace je `internal/platform.ExternalID`. Stejné ID dávají API, Apify, 
 | TikTok | 2026-11-12 | `/v2/user/info/`, `/v2/video/list/`, `/v2/post/publish/inbox/video/init/` (`FILE_UPLOAD`) + PUT po chuncích (≤ 64 MB jeden, jinak 10 MB a zbytek do posledního) | OAuth Login Kit (access 24 h, refresh 365 dní) | dok | Draft přijde do inboxu, publikace se dokončí v appce. Stav je `sent` a bot pošle popisek ke zkopírování. Direct Post až po auditu. `read: api` volitelně místo Apify. |
 | YouTube | 2026-11-12 | YouTube Analytics `reports` (`views,estimatedMinutesWatched,averageViewDuration,subscribersGained`, 28 dní, per video) | OAuth Google | dok | Impressions a CTR v API nejsou, místo nich watch time. `videos.insert` (resumable) je hotový, ale jen pro `publish: api` po auditu projektu. |
 | Video obecně | 2026-11-12 | — | — | — | MP4/MOV sonda (`mvhd`, `tkhd`) při uploadu. Délka a velikost se kontrolují při schválení proti `platform.CheckVideo`. |
+
+## Vlna 5 — dlouhý ocas a odpovědi
+
+| Platforma | Datum | Endpointy | Přihlášení | Zdroj | Rozdíl proti plánu / rozhodnutí |
+|---|---|---|---|---|---|
+| Hacker News | 2026-11-12 | Firebase `user/<id>.json`, Algolia `search_by_date` (`tags=story,author_<id>`; `query`, `numericFilters=created_at_i>`) | žádné | živě | HN nemá sledující, na místě `followers` je karma. Algolia matchuje i kmeny slov, proto se text dofiltruje na přesný výskyt. Komentáře pod mými stories zatím ne, jen zmínky. |
+| dev.to | 2026-11-12 | `/articles/me/published`, `/followers/users`, `/comments?a_id=`, `POST /articles` | `api-key` | živě (tvar `/articles`), zbytek dok | Hlavička `Accept: application/vnd.forem.api-v1+json`, jinak hrozí 403. Publikace nastavuje `canonical_url` na odkaz kampaně. |
+| Product Hunt | 2026-11-12 | GraphQL v2 `user(username){followersCount madePosts{… comments}}` | developer token | dok, **ověřit** | Pole `followersCount` a `madePosts.comments` jsou podle schématu; před nasazením projeď `promohub probe producthunt:<handle>`. |
+| Odpovědi | 2026-11-12 | Bluesky `getPosts` + `createRecord` s `reply{root,parent}`; Mastodon `in_reply_to_id`; Threads `reply_to_id`; IG `/{comment}/replies`; FB `/{comment}/comments`; YouTube `comments.insert` | jako publikace | dok | Mastodon přidá `@autor`, jinak by odpověď nenotifikovala. YouTube potřebuje OAuth se scope `youtube.force-ssl`. |
+| Reddit profil | — | — | — | — | Kind `reddit-profile` v `apifysrc` **není hotový**: plán chce fixture z reálného běhu actoru a ten zatím nebyl. |

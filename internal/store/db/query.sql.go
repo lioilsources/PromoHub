@@ -32,6 +32,53 @@ func (q *Queries) AccountByKey(ctx context.Context, arg AccountByKeyParams) (Acc
 	return i, err
 }
 
+const accountContentStats = `-- name: AccountContentStats :many
+SELECT ci.account_id::bigint AS account_id, count(*)::bigint AS posts,
+       COALESCE(avg(COALESCE(s.likes, 0) + COALESCE(s.reposts, 0) + COALESCE(s.comments, 0)), 0)::double precision AS engagement,
+       COALESCE(avg(s.views), 0)::double precision AS views
+FROM content_items ci
+LEFT JOIN LATERAL (
+    SELECT likes, reposts, comments, views FROM metric_snapshots ms
+    WHERE ms.content_item_id = ci.id ORDER BY taken_at DESC LIMIT 1
+) s ON true
+WHERE ci.account_id IS NOT NULL AND ci.published_at >= $1
+GROUP BY ci.account_id
+`
+
+type AccountContentStatsRow struct {
+	AccountID  int64
+	Posts      int64
+	Engagement float64
+	Views      float64
+}
+
+// Posts of each account published since $1 and the mean engagement (likes + reposts + comments)
+// and views of their latest snapshots.
+func (q *Queries) AccountContentStats(ctx context.Context, publishedAt *time.Time) ([]AccountContentStatsRow, error) {
+	rows, err := q.db.Query(ctx, accountContentStats, publishedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AccountContentStatsRow{}
+	for rows.Next() {
+		var i AccountContentStatsRow
+		if err := rows.Scan(
+			&i.AccountID,
+			&i.Posts,
+			&i.Engagement,
+			&i.Views,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const accountSnapshotAtOrBefore = `-- name: AccountSnapshotAtOrBefore :one
 SELECT id, content_item_id, account_id, platform, taken_at, likes, views, reposts, comments, followers, extra, source_run_id FROM metric_snapshots
 WHERE account_id = $1 AND taken_at <= $2
@@ -641,6 +688,35 @@ func (q *Queries) GetDraft(ctx context.Context, id int64) (Draft, error) {
 	return i, err
 }
 
+const getInboundItem = `-- name: GetInboundItem :one
+SELECT id, platform, kind, external_id, content_item_id, app_id, author, text, rating, url, created_at, collected_at, sentiment, handled, account_id, replied_at, reply_url FROM inbound_items WHERE id = $1
+`
+
+func (q *Queries) GetInboundItem(ctx context.Context, id int64) (InboundItem, error) {
+	row := q.db.QueryRow(ctx, getInboundItem, id)
+	var i InboundItem
+	err := row.Scan(
+		&i.ID,
+		&i.Platform,
+		&i.Kind,
+		&i.ExternalID,
+		&i.ContentItemID,
+		&i.AppID,
+		&i.Author,
+		&i.Text,
+		&i.Rating,
+		&i.Url,
+		&i.CreatedAt,
+		&i.CollectedAt,
+		&i.Sentiment,
+		&i.Handled,
+		&i.AccountID,
+		&i.RepliedAt,
+		&i.ReplyUrl,
+	)
+	return i, err
+}
+
 const getKV = `-- name: GetKV :one
 SELECT value FROM kv WHERE key = $1
 `
@@ -840,8 +916,8 @@ func (q *Queries) InsertEvent(ctx context.Context, arg InsertEventParams) (int64
 }
 
 const insertInboundItem = `-- name: InsertInboundItem :one
-INSERT INTO inbound_items (platform, kind, external_id, content_item_id, app_id, author, text, rating, url, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+INSERT INTO inbound_items (platform, kind, external_id, content_item_id, app_id, author, text, rating, url, created_at, account_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 ON CONFLICT DO NOTHING
 RETURNING id
 `
@@ -857,6 +933,7 @@ type InsertInboundItemParams struct {
 	Rating        *int32
 	Url           *string
 	CreatedAt     *time.Time
+	AccountID     *int64
 }
 
 // Returns no row (pgx.ErrNoRows) when the item was already stored.
@@ -872,6 +949,7 @@ func (q *Queries) InsertInboundItem(ctx context.Context, arg InsertInboundItemPa
 		arg.Rating,
 		arg.Url,
 		arg.CreatedAt,
+		arg.AccountID,
 	)
 	var id int64
 	err := row.Scan(&id)
@@ -1241,6 +1319,20 @@ UPDATE events SET sent_at = now(), attempts = attempts + 1, last_error = NULL WH
 
 func (q *Queries) MarkEventSent(ctx context.Context, id int64) error {
 	_, err := q.db.Exec(ctx, markEventSent, id)
+	return err
+}
+
+const markInboundReplied = `-- name: MarkInboundReplied :exec
+UPDATE inbound_items SET replied_at = now(), reply_url = $2, handled = true WHERE id = $1
+`
+
+type MarkInboundRepliedParams struct {
+	ID       int64
+	ReplyUrl *string
+}
+
+func (q *Queries) MarkInboundReplied(ctx context.Context, arg MarkInboundRepliedParams) error {
+	_, err := q.db.Exec(ctx, markInboundReplied, arg.ID, arg.ReplyUrl)
 	return err
 }
 

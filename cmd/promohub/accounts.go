@@ -18,10 +18,13 @@ import (
 	"github.com/lioilsources/promohub/internal/oauth"
 	"github.com/lioilsources/promohub/internal/platform"
 	"github.com/lioilsources/promohub/internal/platforms/bluesky"
+	"github.com/lioilsources/promohub/internal/platforms/devto"
 	"github.com/lioilsources/promohub/internal/platforms/discord"
 	"github.com/lioilsources/promohub/internal/platforms/facebook"
+	"github.com/lioilsources/promohub/internal/platforms/hackernews"
 	"github.com/lioilsources/promohub/internal/platforms/instagram"
 	"github.com/lioilsources/promohub/internal/platforms/mastodon"
+	"github.com/lioilsources/promohub/internal/platforms/producthunt"
 	"github.com/lioilsources/promohub/internal/platforms/telegram"
 	"github.com/lioilsources/promohub/internal/platforms/threads"
 	"github.com/lioilsources/promohub/internal/platforms/tiktok"
@@ -37,6 +40,7 @@ func readAdapters(hc *http.Client, ts creds.TokenSource) []collectors.Collector 
 	return []collectors.Collector{
 		bluesky.New(hc), mastodon.New(hc), &youtube.Adapter{HTTP: hc, Tokens: ts}, telegram.New(hc), discord.New(hc),
 		instagram.New(hc, ts), threads.New(hc, ts), facebook.New(hc, ts), tiktok.New(hc, ts),
+		hackernews.New(hc), devto.New(hc), producthunt.New(hc),
 	}
 }
 
@@ -224,6 +228,7 @@ func publishers(hc *http.Client, ts creds.TokenSource) []publish.Publisher {
 		threads.Publisher{Adapter: threads.New(hc, ts)},
 		facebook.Publisher{Adapter: facebook.New(hc, ts)},
 		tiktok.Publisher{Adapter: tiktok.New(hc, ts)},
+		devto.Publisher{Adapter: devto.New(hc)},
 		youtube.Publisher{Adapter: &youtube.Adapter{HTTP: hc, Tokens: ts}},
 		bluesky.Publisher{Adapter: bluesky.New(hc)},
 		mastodon.Publisher{Adapter: mastodon.New(hc)},

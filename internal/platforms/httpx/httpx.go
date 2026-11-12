@@ -94,7 +94,9 @@ func (c *Client) Do(ctx context.Context, method, path string, q url.Values, body
 	if ctype != "" && req.Header.Get("Content-Type") == "" {
 		req.Header.Set("Content-Type", ctype)
 	}
-	req.Header.Set("Accept", "application/json")
+	if req.Header.Get("Accept") == "" {
+		req.Header.Set("Accept", "application/json")
+	}
 	hc := c.HTTP
 	if hc == nil {
 		hc = DefaultHTTP
