@@ -234,6 +234,8 @@ func message(on string, p map[string]any) string {
 			fmt.Fprintf(&b, " · %s", a)
 		}
 		fmt.Fprintf(&b, "\n%s", truncate(s("text"), 600))
+	case on == rules.OnAccountError:
+		fmt.Fprintf(&b, "[%s] %s %s failing: %s", s("platform"), s("account"), s("capability"), truncate(s("error"), 300))
 	case on == rules.OnContentNew:
 		fmt.Fprintf(&b, "[%s] new post: %s", s("platform"), truncate(s("title"), 200))
 	default:

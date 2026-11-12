@@ -1,13 +1,14 @@
 # Rules: on <trigger> [when <expression>] then <targets>.
 #
 # Triggers: inbound.comment | inbound.review | inbound.mention | inbound.reply |
-#           metric.snapshot | metric.delta | content.new
+#           metric.snapshot | metric.delta | content.new | account.error
 # Variables:
 #   inbound.*  platform, kind, author, text, url, app, rating
 #   metric.*   platform, scope (account|content), url, text, likes, views, reposts, comments,
 #              followers, <metric>_delta (vs previous snapshot), <metric>_delta_24h,
 #              hours_since_prev, plus extras such as quotes, bookmarks, saves
 #   content.new platform, url, title, text
+#   account.error platform, account, capability, error, fails (fires once, at the 3rd failure in a row)
 # Operators: < <= > >= == != and or not ( ) · text matches /re/i · text contains "x" ·
 #            followers crosses [100, 500]
 # Targets: ifttt:<webhooks event> · telegram:<sinks.telegram name> · discord:<sinks.discord name>
@@ -36,6 +37,10 @@ rules:
     on: metric.snapshot
     when: scope == "account" and followers crosses [100, 500, 1000, 5000, 10000]
     then: ifttt:promo_metric_jump
+  # A read adapter keeps failing (expired secret, renamed handle). Enable with a sink:
+  # - name: account_error
+  #   on: account.error
+  #   then: telegram:urgent
 
 # Direct sinks, bypassing IFTTT. Uncomment and set the env vars to use telegram:urgent /
 # discord:milestones in rules above.

@@ -8,9 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"time"
 
 	"github.com/lioilsources/promohub/internal/apify"
+	"github.com/lioilsources/promohub/internal/collectors"
 	"github.com/lioilsources/promohub/internal/collectors/apifysrc"
 	"github.com/lioilsources/promohub/internal/config"
 	"github.com/lioilsources/promohub/internal/ifttt"
@@ -35,6 +37,11 @@ type Hub struct {
 	telegram *notify.Telegram
 	metrics  *metrics.Registry
 	now      func() time.Time
+	rand     func() float64
+
+	collectors map[string]collectors.Collector // platform → read adapter
+	jobs       map[jobKey]job
+	terms      []string
 
 	accountIDs map[string]int64 // "platform:handle" → accounts.id
 	appIDs     map[string]int64 // slug → apps.id
@@ -53,12 +60,15 @@ type Deps struct {
 	IFTTT    *ifttt.Client
 	Telegram *notify.Telegram
 	Metrics  *metrics.Registry
+	// Collectors are the official-API read adapters by platform (internal/platforms).
+	Collectors []collectors.Collector
 }
 
 func New(d Deps) *Hub {
 	h := &Hub{
 		log: d.Log, env: d.Env, files: d.Files, rules: d.Rules, store: d.Store, apify: d.Apify,
-		ifttt: d.IFTTT, telegram: d.Telegram, metrics: d.Metrics, now: time.Now,
+		ifttt: d.IFTTT, telegram: d.Telegram, metrics: d.Metrics, now: time.Now, rand: rand.Float64,
+		collectors: map[string]collectors.Collector{}, jobs: map[jobKey]job{}, terms: searchTerms(d.Files),
 		accountIDs: map[string]int64{}, appIDs: map[string]int64{},
 		wakeRuns: make(chan struct{}, 1), wakeEvents: make(chan struct{}, 1),
 	}
@@ -69,6 +79,10 @@ func New(d Deps) *Hub {
 	h.metrics.Help("promohub_apify_runs_total", "Apify runs by processing result.")
 	h.metrics.Help("promohub_inbound_new_total", "New inbound items (comments, mentions, reviews).")
 	h.metrics.Help("promohub_events_total", "Outbound event deliveries by target kind and result.")
+	h.metrics.Help("promohub_collect_total", "Official-API collector passes by platform, capability and result.")
+	for _, c := range d.Collectors {
+		h.collectors[c.Platform()] = c
+	}
 	return h
 }
 
@@ -96,7 +110,7 @@ func (h *Hub) SyncConfig(ctx context.Context) error {
 		}
 		h.appIDs[a.Slug] = id
 	}
-	return nil
+	return h.planJobs(ctx)
 }
 
 func nudge(c chan struct{}) {
@@ -109,6 +123,7 @@ func nudge(c chan struct{}) {
 // Run starts the background workers and blocks until ctx ends.
 func (h *Hub) Run(ctx context.Context) {
 	go h.loop(ctx, "runs", h.wakeRuns, h.processPendingRuns)
+	go h.loop(ctx, "collect", nil, h.collectDue)
 	h.loop(ctx, "events", h.wakeEvents, h.deliverPending)
 }
 

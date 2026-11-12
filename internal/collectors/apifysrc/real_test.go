@@ -118,7 +118,7 @@ func TestRealInstagramProfile(t *testing.T) {
 	if len(b.Snapshots) != 2 || b.Skipped != 1 {
 		t.Fatalf("snapshots=%d skipped=%d", len(b.Snapshots), b.Skipped)
 	}
-	if p := b.Snapshots[0]; *p.Views != 3468670 || p.Content.URL != "https://www.instagram.com/p/DeTUk4sDSp-/" {
+	if p := b.Snapshots[0]; *p.Views != 3468670 || p.Content.URL != "https://www.instagram.com/p/DeTUk4sDSp-/" || p.Content.ExternalID != "DeTUk4sDSp-" {
 		t.Fatalf("%+v", p)
 	}
 	if *b.Snapshots[1].Followers != 104425748 {

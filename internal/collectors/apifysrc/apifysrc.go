@@ -150,7 +150,9 @@ func mapTikTok(b *collectors.Batch, m obj, owner string) bool {
 }
 
 func mapIGPost(b *collectors.Batch, m obj, owner string) bool {
-	id := m.str("id", "shortCode", "shortcode")
+	// The shortcode is the canonical ID (platform.ExternalID): the Graph API, IFTTT and pasted
+	// URLs all yield it, the numeric media ID only the scraper.
+	id := m.str("shortCode", "shortcode", "id")
 	if id == "" {
 		return false
 	}

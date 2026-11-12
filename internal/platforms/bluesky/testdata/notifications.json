@@ -1,0 +1,6 @@
+{"notifications":[
+ {"uri":"at://did:plc:fan000000000000000000000/app.bsky.feed.post/3n2aaaaaaaa2a","author":{"did":"did:plc:fan000000000000000000000","handle":"fan.bsky.social"},"reason":"mention","record":{"$type":"app.bsky.feed.post","text":"@ol1n.bsky.social SwypeKids is great","createdAt":"2026-11-12T08:00:00.000Z"},"isRead":false,"indexedAt":"2026-11-12T08:00:01.000Z"},
+ {"uri":"at://did:plc:fan000000000000000000000/app.bsky.feed.post/3n2bbbbbbbb2b","author":{"did":"did:plc:fan000000000000000000000","handle":"fan.bsky.social"},"reason":"reply","reasonSubject":"at://did:plc:me/app.bsky.feed.post/3n1","record":{"text":"agreed","createdAt":"2026-11-12T09:00:00.000Z"},"isRead":false,"indexedAt":"2026-11-12T09:00:01.000Z"},
+ {"uri":"at://did:plc:fan000000000000000000000/app.bsky.feed.like/3n2cccccccc2c","author":{"did":"did:plc:fan000000000000000000000","handle":"fan.bsky.social"},"reason":"like","record":{},"isRead":false,"indexedAt":"2026-11-12T09:30:00.000Z"},
+ {"uri":"at://did:plc:old000000000000000000000/app.bsky.feed.post/3n0dddddddd0d","author":{"did":"did:plc:old000000000000000000000","handle":"old.bsky.social"},"reason":"mention","record":{"text":"old one","createdAt":"2026-11-10T09:00:00.000Z"},"isRead":true,"indexedAt":"2026-11-10T09:00:01.000Z"}
+],"seenAt":"2026-11-12T07:00:00.000Z"}

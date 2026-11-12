@@ -4,6 +4,8 @@
 //	promohub serve        migrate, sync config, serve HTTP and run workers (default)
 //	promohub migrate      apply migrations and exit
 //	promohub check        validate CONFIG_DIR (apps/accounts/rules.yaml) and exit
+//	promohub accounts     table of accounts, read/publish paths and collector state
+//	promohub probe a:b    run one read adapter pass against the real API, print JSON, no DB
 //	promohub healthcheck  GET /healthz on LISTEN_ADDR (for the container HEALTHCHECK)
 package main
 
@@ -46,10 +48,14 @@ func main() {
 		err = check()
 	case "healthcheck":
 		err = healthcheck()
+	case "accounts":
+		err = accounts()
+	case "probe":
+		err = probe(os.Args[2:])
 	case "version":
 		fmt.Println(version)
 	default:
-		err = fmt.Errorf("unknown command %q (serve|migrate|check|healthcheck|version)", cmd)
+		err = fmt.Errorf("unknown command %q (serve|migrate|check|accounts|probe|healthcheck|version)", cmd)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "promohub:", err)
@@ -129,9 +135,10 @@ func serve() error {
 
 	h := hub.New(hub.Deps{
 		Log: log, Env: env, Files: files, Rules: eng, Store: st,
-		Apify:    apify.New(env.ApifyToken),
-		IFTTT:    ifttt.NewClient(env.IFTTTKey),
-		Telegram: &notify.Telegram{Token: env.TelegramBotToken},
+		Apify:      apify.New(env.ApifyToken),
+		IFTTT:      ifttt.NewClient(env.IFTTTKey),
+		Telegram:   &notify.Telegram{Token: env.TelegramBotToken},
+		Collectors: readAdapters(&http.Client{Timeout: 30 * time.Second}),
 	})
 	if err := h.SyncConfig(ctx); err != nil {
 		return err

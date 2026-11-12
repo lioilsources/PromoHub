@@ -127,3 +127,37 @@ FROM apify_runs WHERE received_at >= $1;
 -- name: GiveUpEvent :exec
 -- Permanent failure (4xx from the target): stop retrying but keep the row for inspection.
 UPDATE events SET attempts = sqlc.arg(max_attempts)::int, last_error = $1 WHERE id = $2;
+
+-- name: EnsureCollectorState :exec
+INSERT INTO collector_state (account_id, capability) VALUES ($1, $2)
+ON CONFLICT DO NOTHING;
+
+-- name: DueCollectorStates :many
+SELECT * FROM collector_state
+WHERE next_run_at <= sqlc.arg(now)::timestamptz
+ORDER BY next_run_at
+LIMIT 50;
+
+-- name: CollectorOK :exec
+-- A NULL cursor keeps the previous one.
+UPDATE collector_state
+SET cursor = COALESCE(sqlc.narg(cursor)::jsonb, cursor), next_run_at = sqlc.arg(next_run_at),
+    last_run_at = sqlc.arg(ran_at), last_ok_at = sqlc.arg(ran_at), fail_count = 0, last_error = NULL
+WHERE account_id = sqlc.arg(account_id) AND capability = sqlc.arg(capability);
+
+-- name: CollectorFailed :one
+-- counts=false records the error without counting a failure (secret not set yet).
+UPDATE collector_state
+SET next_run_at = sqlc.arg(next_run_at), last_run_at = sqlc.arg(ran_at), last_error = sqlc.arg(last_error),
+    fail_count = fail_count + CASE WHEN sqlc.arg(counts)::boolean THEN 1 ELSE 0 END
+WHERE account_id = sqlc.arg(account_id) AND capability = sqlc.arg(capability)
+RETURNING fail_count;
+
+-- name: PostponeCollector :exec
+UPDATE collector_state SET next_run_at = $3 WHERE account_id = $1 AND capability = $2;
+
+-- name: ListCollectorStates :many
+SELECT * FROM collector_state ORDER BY account_id, capability;
+
+-- name: ListAccounts :many
+SELECT * FROM accounts ORDER BY id;

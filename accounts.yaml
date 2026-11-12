@@ -1,5 +1,21 @@
 # My promo accounts and the Apify tasks the hub trusts.
 #
+# accounts[] (Prompts/01-ACCOUNTS_PLAN.md §5; Prompts/02-CHROME_PROMPTS.md fills them in):
+#   platform     bluesky | mastodon | x | threads | instagram | facebook | youtube | tiktok | reddit |
+#                linkedin | pinterest | telegram | discord | hackernews | producthunt | devto
+#   handle       my handle; Mastodon user@instance
+#   external_id  Bluesky DID, YouTube UC… channel ID, Facebook page ID, Discord invite code, …
+#   auth_ref     env prefix of the account's secrets (BLUESKY_MAIN → BLUESKY_MAIN_APP_PASSWORD);
+#                "oauth" for tokens the hub keeps itself; default = upper-case platform
+#   read         api | apify | none      (default from internal/platform)
+#   publish      api | ifttt | manual | none
+#   ifttt_event  Webhooks event of the publish applet (default publish_<platform>)
+#   lang         en (default) | cs | any — which campaigns the account takes
+#   apps         app slugs this account promotes; empty = all
+#   hashtags     Mastodon: extra hashtags to watch for app mentions
+#   instance     API host override (own PDS, Mastodon-compatible server)
+# `promohub accounts` shows the resulting paths and what is still missing.
+#
 # apify_tasks[].id is the Apify task ID (Console → task → API → "Task ID"), not its name:
 # webhooks carry the ID and anything not listed here is rejected with 403.
 # kind decides how the dataset is mapped: x-profile, x-mentions, tiktok-profile,
@@ -13,8 +29,20 @@ accounts:
     handle: TODO_tiktok_handle
   - platform: youtube
     handle: TODO_youtube_handle
+    auth_ref: YOUTUBE
   - platform: bluesky
     handle: TODO.bsky.social
+    auth_ref: BLUESKY_MAIN
+  # Uncomment once the account exists (Prompts/02-CHROME_PROMPTS.md):
+  # - platform: mastodon
+  #   handle: TODO@mastodon.social
+  #   auth_ref: MASTODON_MAIN
+  #   hashtags: [indiedev, gamedev, kidsapps]
+  # - platform: telegram
+  #   handle: TODO_channel
+  # - platform: discord
+  #   handle: TODO_server
+  #   external_id: TODO_INVITE_CODE
 
 apify_tasks:
   - name: x-profile

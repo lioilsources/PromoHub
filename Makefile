@@ -2,8 +2,9 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 IMAGE   ?= ghcr.io/lioilsources/promohub
 JODA    ?= joda
 STACK   ?= stack
-# Throwaway Postgres for `make test-db`.
-TEST_PG ?= postgres://promohub:promohub@127.0.0.1:55432/promohub?sslmode=disable
+# Throwaway Postgres for `make test-db` (TEST_PG_PORT=… when 55432 is taken).
+TEST_PG_PORT ?= 55432
+TEST_PG ?= postgres://promohub:promohub@127.0.0.1:$(TEST_PG_PORT)/promohub?sslmode=disable
 
 .PHONY: build test test-db vet generate check run docker push deploy deploy-config pg-up pg-down
 
@@ -18,7 +19,7 @@ test-db: pg-up
 	PROMOHUB_TEST_DATABASE_URL='$(TEST_PG)' go test -count=1 ./...
 
 pg-up:
-	docker run -d --rm --name promohub-test-pg -p 55432:5432 \
+	docker run -d --rm --name promohub-test-pg -p $(TEST_PG_PORT):5432 \
 		-e POSTGRES_USER=promohub -e POSTGRES_PASSWORD=promohub -e POSTGRES_DB=promohub postgres:17-alpine >/dev/null
 	until docker exec promohub-test-pg pg_isready -U promohub -d promohub >/dev/null 2>&1; do sleep 1; done
 
