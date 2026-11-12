@@ -103,3 +103,36 @@ func TestPublishRejectsOnBadPassword(t *testing.T) {
 		t.Fatalf("login failure must be a clean failure: %v", err)
 	}
 }
+
+func TestPublishVideoEmbed(t *testing.T) {
+	withSecret(t, "app-pass-1234")
+	var rec map[string]any
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /xrpc/com.atproto.server.createSession", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"accessJwt":"jwt-1","did":"did:plc:me","handle":"ol1n.bsky.social"}`))
+	})
+	mux.HandleFunc("POST /xrpc/com.atproto.repo.uploadBlob", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Content-Type") != "video/mp4" {
+			t.Errorf("type %q", r.Header.Get("Content-Type"))
+		}
+		w.Write([]byte(`{"blob":{"$type":"blob","mimeType":"video/mp4","size":5}}`))
+	})
+	mux.HandleFunc("POST /xrpc/com.atproto.repo.createRecord", func(w http.ResponseWriter, r *http.Request) {
+		var in map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&in)
+		rec = in["record"].(map[string]any)
+		w.Write([]byte(`{"uri":"at://did:plc:me/app.bsky.feed.post/3vid"}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	a := New(srv.Client())
+	a.AppView, a.PDS = srv.URL, srv.URL
+	p := filepath.Join(t.TempDir(), "v.mp4")
+	os.WriteFile(p, []byte("video"), 0o600)
+	if _, err := (Publisher{a}).Publish(context.Background(), acct, publish.Post{Text: "clip", Media: []publish.Media{{Path: p, Mime: "video/mp4", Width: 1080, Height: 1920}}}); err != nil {
+		t.Fatal(err)
+	}
+	if e := rec["embed"].(map[string]any); e["$type"] != "app.bsky.embed.video" || e["aspectRatio"] == nil {
+		t.Fatalf("%+v", e)
+	}
+}

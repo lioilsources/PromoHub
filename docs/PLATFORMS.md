@@ -41,3 +41,15 @@ Implementace je `internal/platform.ExternalID`. Stejné ID dávají API, Apify, 
 | Threads | 2026-11-12 | `graph.threads.net/v1.0`: `/me/threads`, `/me/threads_insights` (`followers_count`), `/{id}/insights`, `/me/mentions`, `/{id}/replies`, `/me/threads` → `/me/threads_publish` | OAuth Threads: 60denní token, `th_refresh_token` | dok | Textový post nese `link_attachment`. `REPOST_FACADE` se přeskakuje. `keyword_search` zatím ne (malá kvóta). |
 | Facebook Page | 2026-11-12 | `graph.facebook.com/v24.0`: `/{page}` (`followers_count,fan_count`), `/{page}/posts`, `/{post}/comments`, publikace `/{page}/feed` a `/{page}/photos` | Facebook Login → dlouhodobý user token → page token (neexpiruje) | dok | Výchozí publikace zůstává IFTTT: v Development módu posty aplikace vidí jen role aplikace. Cesta `api` je připravená pro Live. |
 | OAuth obecně | 2026-11-12 | `/oauth/{platform}/start`, `/callback`, `/deauthorize` | `state` podepsaný HMAC, platnost 10 min | — | Tokeny jsou šifrované AES-256-GCM s AAD na účet. Refresh se dělá líně při použití a jednou za 6 h; varování `account.auth_expiring` max. 1× denně. |
+
+## Vlna 4 — video
+
+| Platforma | Datum | Endpointy | Přihlášení | Zdroj | Rozdíl proti plánu / rozhodnutí |
+|---|---|---|---|---|---|
+| Bluesky | 2026-11-12 | `uploadBlob` (video/mp4) + `app.bsky.embed.video` | app password | dok | Bez video služby `video.bsky.app`: blob jde přímo na PDS, zpracuje ho AppView. Limit 100 MB / 3 min, ověřit, zdroje se rozcházejí. |
+| Mastodon | 2026-11-12 | `POST /api/v2/media` (streamovaně), poll `GET /api/v1/media/:id` až 3 min | token | dok | Limit instance `configuration.media_attachments.video_size_limit` (~99 MB). |
+| Telegram | 2026-11-12 | `sendVideo` (multipart, `supports_streaming`) | bot | dok | Bot smí poslat max. 50 MB. |
+| Instagram / Threads | 2026-11-12 | kontejner `REELS` / `VIDEO` s `video_url` (`/media/{token}`), čekání na `FINISHED` | OAuth | dok | Hub nic netranskóduje. Při chybě kontejneru je to Reject, protože před publish ještě nic není veřejné. |
+| TikTok | 2026-11-12 | `/v2/user/info/`, `/v2/video/list/`, `/v2/post/publish/inbox/video/init/` (`FILE_UPLOAD`) + PUT po chuncích (≤ 64 MB jeden, jinak 10 MB a zbytek do posledního) | OAuth Login Kit (access 24 h, refresh 365 dní) | dok | Draft přijde do inboxu, publikace se dokončí v appce. Stav je `sent` a bot pošle popisek ke zkopírování. Direct Post až po auditu. `read: api` volitelně místo Apify. |
+| YouTube | 2026-11-12 | YouTube Analytics `reports` (`views,estimatedMinutesWatched,averageViewDuration,subscribersGained`, 28 dní, per video) | OAuth Google | dok | Impressions a CTR v API nejsou, místo nich watch time. `videos.insert` (resumable) je hotový, ale jen pro `publish: api` po auditu projektu. |
+| Video obecně | 2026-11-12 | — | — | — | MP4/MOV sonda (`mvhd`, `tkhd`) při uploadu. Délka a velikost se kontrolují při schválení proti `platform.CheckVideo`. |

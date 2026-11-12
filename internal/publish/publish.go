@@ -13,15 +13,18 @@ import (
 
 // Media is one attached file. Path is local (for upload APIs), URL public (for pull APIs).
 type Media struct {
-	ID     int64
-	Path   string
-	URL    string
-	Mime   string
-	Alt    string
-	Width  int
-	Height int
-	Bytes  int64
+	ID         int64
+	Path       string
+	URL        string
+	Mime       string
+	Alt        string
+	Width      int
+	Height     int
+	Bytes      int64
+	DurationMs int
 }
+
+func (m Media) IsVideo() bool { return len(m.Mime) > 6 && m.Mime[:6] == "video/" }
 
 func (m Media) IsImage() bool { return len(m.Mime) > 6 && m.Mime[:6] == "image/" }
 
@@ -42,6 +45,7 @@ type Result struct {
 	ExternalID string
 	URL        string
 	Sent       bool
+	Note       string // what Olin still has to do by hand (TikTok: finish the draft in the app)
 }
 
 type Publisher interface {

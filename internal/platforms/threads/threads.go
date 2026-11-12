@@ -157,7 +157,7 @@ func MapProfile(followers *int64, posts []Post, ins map[string]map[string]int64)
 			Platform: "threads",
 			Content:  &collectors.Content{ExternalID: id, URL: p.Permalink, Body: p.Text, PublishedAt: instagram.Time(p.Timestamp)},
 			Views:    meta.Ptr(in, "views"), Likes: meta.Ptr(in, "likes"), Comments: meta.Ptr(in, "replies"),
-			Reposts:  meta.Ptr(in, "reposts"), Extra: extra,
+			Reposts: meta.Ptr(in, "reposts"), Extra: extra,
 		})
 	}
 	if followers != nil {

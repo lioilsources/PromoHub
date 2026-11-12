@@ -24,6 +24,7 @@ import (
 	"github.com/lioilsources/promohub/internal/platforms/mastodon"
 	"github.com/lioilsources/promohub/internal/platforms/telegram"
 	"github.com/lioilsources/promohub/internal/platforms/threads"
+	"github.com/lioilsources/promohub/internal/platforms/tiktok"
 	"github.com/lioilsources/promohub/internal/platforms/youtube"
 	"github.com/lioilsources/promohub/internal/publish"
 	"github.com/lioilsources/promohub/internal/store"
@@ -34,8 +35,8 @@ import (
 // OAuth tokens; nil makes OAuth accounts "not connected".
 func readAdapters(hc *http.Client, ts creds.TokenSource) []collectors.Collector {
 	return []collectors.Collector{
-		bluesky.New(hc), mastodon.New(hc), youtube.New(hc), telegram.New(hc), discord.New(hc),
-		instagram.New(hc, ts), threads.New(hc, ts), facebook.New(hc, ts),
+		bluesky.New(hc), mastodon.New(hc), &youtube.Adapter{HTTP: hc, Tokens: ts}, telegram.New(hc), discord.New(hc),
+		instagram.New(hc, ts), threads.New(hc, ts), facebook.New(hc, ts), tiktok.New(hc, ts),
 	}
 }
 
@@ -222,6 +223,8 @@ func publishers(hc *http.Client, ts creds.TokenSource) []publish.Publisher {
 		instagram.Publisher{Adapter: instagram.New(hc, ts)},
 		threads.Publisher{Adapter: threads.New(hc, ts)},
 		facebook.Publisher{Adapter: facebook.New(hc, ts)},
+		tiktok.Publisher{Adapter: tiktok.New(hc, ts)},
+		youtube.Publisher{Adapter: &youtube.Adapter{HTTP: hc, Tokens: ts}},
 		bluesky.Publisher{Adapter: bluesky.New(hc)},
 		mastodon.Publisher{Adapter: mastodon.New(hc)},
 		telegram.Publisher{Adapter: telegram.New(hc)},

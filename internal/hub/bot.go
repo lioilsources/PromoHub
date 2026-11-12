@@ -268,6 +268,10 @@ func (h *Hub) SaveMedia(ctx context.Context, r io.Reader, name, alt string) (db.
 		w, hh := int32(s.Width), int32(s.Height)
 		p.Width, p.Height = &w, &hh
 	}
+	if s.DurationMs > 0 {
+		d := int32(s.DurationMs)
+		p.DurationMs = &d
+	}
 	return h.store.InsertMediaAsset(ctx, p)
 }
 
@@ -633,4 +637,18 @@ func oneLine(s string, n int) string {
 		return string(r[:n]) + "…"
 	}
 	return s
+}
+
+// sendNote tells Olin what is left to do by hand after a hand-over (TikTok inbox draft).
+func (h *Hub) sendNote(ctx context.Context, d db.Draft, acct config.Account, p publish.Post, note string) {
+	if h.bot == nil {
+		return
+	}
+	text := fmt.Sprintf("📲 %s (#d%d): %s\n\nPopisek:\n<code>%s</code>", html.EscapeString(acct.Key()), d.ID, html.EscapeString(note), html.EscapeString(p.Text))
+	_, err := h.bot.Send(ctx, h.adminChat(&d), text, tgbot.Opts{HTML: true, Keyboard: tgbot.Keyboard{{
+		{Text: "🔗 Vyšlo, pošlu URL", Data: fmt.Sprintf("u:%d:y", d.ID)},
+	}}})
+	if err != nil {
+		h.log.Error("send note", "draft", d.ID, "err", err)
+	}
 }

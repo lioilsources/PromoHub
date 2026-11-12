@@ -153,6 +153,16 @@ func (h *Hub) approveDraft(ctx context.Context, d db.Draft, at *time.Time) (db.D
 	if acct.Platform == "pinterest" && !h.campaignHasImage(ctx, d.CampaignID) {
 		return d, errors.New("Pinterest potřebuje obrázek")
 	}
+	if d.Via == string(platform.ViaAPI) {
+		ms, _ := h.campaignMedia(ctx, d.CampaignID)
+		for _, m := range ms {
+			if m.IsVideo() {
+				if why := spec.CheckVideo(m.Bytes, m.DurationMs); why != "" {
+					return d, errors.New(why)
+				}
+			}
+		}
+	}
 	now := h.now()
 	if acct.MaxPerDay > 0 {
 		n, err := h.store.ApprovedSince(ctx, db.ApprovedSinceParams{AccountID: d.AccountID, ID: d.ID, ApprovedAt: ptr(now.Add(-24 * time.Hour))})
@@ -212,6 +222,9 @@ func (h *Hub) campaignMedia(ctx context.Context, campaignID int64) ([]publish.Me
 			Alt: deref(a.Alt), Bytes: a.Bytes}
 		if a.Width != nil && a.Height != nil {
 			m.Width, m.Height = int(*a.Width), int(*a.Height)
+		}
+		if a.DurationMs != nil {
+			m.DurationMs = int(*a.DurationMs)
 		}
 		out = append(out, m)
 	}
@@ -301,6 +314,9 @@ func (h *Hub) publishOne(ctx context.Context, d db.Draft) {
 	switch {
 	case err == nil && res.Sent:
 		h.finish(ctx, d, "sent", res, nil)
+		if res.Note != "" {
+			h.sendNote(ctx, d, acct, post, res.Note)
+		}
 		if d.Via == string(platform.ViaIFTTT) {
 			h.kickProfileTask(acct)
 		}

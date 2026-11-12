@@ -285,3 +285,23 @@ Publikace:
 - Instagram potřebuje obrázek nebo video. Médium bere z veřejné `/media/{token}` URL, takže musí fungovat Caddy snippet z vlny 2.
 - Threads publikuje i čistý text a odkaz dá jako link attachment.
 - Facebook zůstává na IFTTT, dokud Meta aplikace není Live.
+
+---
+
+## 9. Vlna 4 — video, TikTok a YouTube
+
+Pošli video botovi s popiskem `/post …`, do 20 MB přímo. Větší nahraj přes `make media FILE=clip.mp4` a pak použij `/post … media=ID`.
+
+- Hub bere jen MP4/MOV a nic nepřekódovává. Vertikální 9:16 do 3 min projde všude: Reels, Shorts, TikTok, Bluesky.
+- Délka a velikost se kontrolují až při schválení. Pokud video pro platformu nesedí, karta to řekne a draft zůstane neschválený.
+
+| Platforma | Co se stane s videem |
+|---|---|
+| Bluesky, Mastodon, Telegram kanál | Rovnou vyjde. |
+| Instagram (Reels), Threads | Vyjde přes kontejner. |
+| TikTok | `publish: api` + `/connect tiktok:<handle>` (prompt 7). Video přijde jako draft do TikTok inboxu a bot pošle popisek. V appce ho dokončíš a pak dáš „Vyšlo, pošlu URL“. Bez OAuth zůstává ruční karta. |
+| YouTube Shorts | Ruční karta s titulkem a popisem. Po schválení auditu Google API přepni účet na `publish: api` a `/connect youtube:<handle>`. |
+
+YouTube Analytics: po `/connect youtube:<handle>` (OAuth klient z promptu 5) přibudou u videí metriky za 28 dní: `watch_minutes_28d`, `avg_view_seconds_28d` a `subscribers_gained_28d`.
+
+TikTok čtení přes API místo Apify: u účtu nastav `read: api` a Apify task `tiktok-profile` smaž.

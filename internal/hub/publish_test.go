@@ -331,3 +331,19 @@ func (e *env) ingestX(ctx context.Context, body string) (IngestResult, error) {
 	})
 	return res, err
 }
+
+func TestVideoLimitsOnApproval(t *testing.T) {
+	e, _, pub := publishEnv(t)
+	ctx := context.Background()
+	dur, w, hh := int32(200_000), int32(1080), int32(1920)
+	a, err := e.st.InsertMediaAsset(ctx, db.InsertMediaAssetParams{Token: "tok", Path: "/nonexistent.mp4", Name: "v.mp4", Mime: "video/mp4",
+		Bytes: 20 << 20, Sha256: "x", Width: &w, Height: &hh, DurationMs: &dur, ExpiresAt: e.hub.now().Add(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.message("/post swypekids media=" + itoa(a.ID) + " Trailer for SwypeKids")
+	e.press("d:" + itoa(e.draftID("bluesky")) + ":a")
+	if s := e.draftStatus("bluesky"); s != "draft" || len(pub.posts) != 0 {
+		t.Fatalf("a 200 s video must not be approved for Bluesky: %s", s)
+	}
+}

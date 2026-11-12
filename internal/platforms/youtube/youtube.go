@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/lioilsources/promohub/internal/collectors"
 	"github.com/lioilsources/promohub/internal/config"
@@ -33,6 +34,11 @@ const (
 type Adapter struct {
 	HTTP *http.Client
 	Base string
+	// Tokens enables YouTube Analytics (watch time) and uploads; nil = API key only.
+	Tokens        creds.TokenSource
+	AnalyticsBase string
+	UploadBase    string
+	Now           func() time.Time
 
 	mu       sync.Mutex
 	channels map[string]channelInfo // account key → resolved channel
@@ -211,7 +217,72 @@ func (a *Adapter) profile(ctx context.Context, acct config.Account) (collectors.
 			return collectors.Batch{}, err
 		}
 	}
-	return MapProfile(ch, vids.Items), nil
+	b := MapProfile(ch, vids.Items)
+	if a.Tokens != nil {
+		if rows, err := a.analytics(ctx, acct); err == nil {
+			AddAnalytics(&b, rows)
+		}
+	}
+	return b, nil
+}
+
+// analytics returns 28-day per-video watch metrics (needs the OAuth token; errors are only
+// logged by skipping, the key-based metrics still count).
+func (a *Adapter) analytics(ctx context.Context, acct config.Account) ([][]any, error) {
+	t, err := creds.OAuthToken(ctx, a.Tokens, acct)
+	if err != nil {
+		return nil, err
+	}
+	base := a.AnalyticsBase
+	if base == "" {
+		base = "https://youtubeanalytics.googleapis.com/v2"
+	}
+	now := time.Now
+	if a.Now != nil {
+		now = a.Now
+	}
+	end := now().UTC()
+	c := &httpx.Client{Service: "youtube-analytics", BaseURL: base, HTTP: a.HTTP, Secrets: []string{t.AccessToken},
+		Header: http.Header{"Authorization": {"Bearer " + t.AccessToken}}}
+	var res struct {
+		Rows [][]any `json:"rows"`
+	}
+	err = c.Get(ctx, "/reports", url.Values{
+		"ids": {"channel==MINE"}, "startDate": {end.AddDate(0, 0, -28).Format("2006-01-02")}, "endDate": {end.Format("2006-01-02")},
+		"metrics": {"views,estimatedMinutesWatched,averageViewDuration,subscribersGained"}, "dimensions": {"video"},
+		"sort": {"-views"}, "maxResults": {"50"},
+	}, &res)
+	return res.Rows, err
+}
+
+// AddAnalytics puts the 28-day metrics into the extras of the matching video snapshots.
+func AddAnalytics(b *collectors.Batch, rows [][]any) {
+	by := map[string][]any{}
+	for _, r := range rows {
+		if len(r) == 5 {
+			if id, ok := r[0].(string); ok {
+				by[id] = r
+			}
+		}
+	}
+	for i := range b.Snapshots {
+		s := &b.Snapshots[i]
+		if s.Content == nil {
+			continue
+		}
+		r, ok := by[s.Content.ExternalID]
+		if !ok {
+			continue
+		}
+		if s.Extra == nil {
+			s.Extra = map[string]int64{}
+		}
+		for j, k := range []string{"", "views_28d", "watch_minutes_28d", "avg_view_seconds_28d", "subscribers_gained_28d"} {
+			if v, ok := r[j].(float64); ok && k != "" {
+				s.Extra[k] = int64(v)
+			}
+		}
+	}
 }
 
 // MapProfile maps channel statistics and recent uploads.

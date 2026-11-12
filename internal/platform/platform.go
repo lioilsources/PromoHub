@@ -54,6 +54,10 @@ type Spec struct {
 	URLWeight int        // a URL counts as this many characters (0 = its real length)
 	MaxImages int
 	TitleMax  int // for platforms with a separate title (YouTube, Reddit, Pinterest, dev.to)
+
+	// Video limits of the publish path; VideoMB == 0 means the path takes no video.
+	VideoMB      int
+	VideoSeconds int
 }
 
 var all = []Spec{
@@ -82,7 +86,8 @@ var all = []Spec{
 		Intervals: iv(3*time.Hour, 15*time.Minute, 0), HandleHelp: "channel handle without @",
 		TextLimit: 5000, Unit: Runes, TitleMax: 100},
 	{Name: "tiktok", Title: "TikTok", Read: ViaApify, Publish: ViaManual,
-		ReadVias: v(ViaApify, ViaNone), PubVias: v(ViaManual, ViaAPI, ViaNone),
+		ReadVias: v(ViaApify, ViaAPI, ViaNone), PubVias: v(ViaManual, ViaAPI, ViaNone),
+		Intervals: iv(6*time.Hour, 0, 0),
 		TextLimit: 2200, Unit: Runes},
 	{Name: "reddit", Title: "Reddit", Read: ViaApify, Publish: ViaManual,
 		ReadVias: v(ViaApify, ViaNone), PubVias: v(ViaManual, ViaNone),

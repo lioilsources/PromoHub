@@ -27,13 +27,14 @@ const MaxBytes = 300 << 20
 
 // Saved describes a stored file.
 type Saved struct {
-	Path   string
-	Name   string
-	Mime   string
-	Bytes  int64
-	Sha256 string
-	Width  int
-	Height int
+	Path       string
+	Name       string
+	Mime       string
+	Bytes      int64
+	Sha256     string
+	Width      int
+	Height     int
+	DurationMs int // videos
 }
 
 // Save copies r into dir under a content-addressed name.
@@ -77,6 +78,14 @@ func Save(dir string, r io.Reader, name string) (Saved, error) {
 	s.Path = filepath.Join(dir, s.Sha256[:32]+strings.ToLower(ext))
 	if err := os.Rename(tmp.Name(), s.Path); err != nil {
 		return Saved{}, err
+	}
+	if strings.HasPrefix(s.Mime, "video/") {
+		vi, err := ProbeMP4(s.Path)
+		if err != nil {
+			os.Remove(s.Path)
+			return Saved{}, fmt.Errorf("video: %w (MP4 or MOV only, no transcoding)", err)
+		}
+		s.Width, s.Height, s.DurationMs = vi.Width, vi.Height, vi.DurationMs
 	}
 	return s, nil
 }
