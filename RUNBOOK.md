@@ -327,3 +327,34 @@ TikTok čtení přes API místo Apify: u účtu nastav `read: api` a Apify task 
 4. **`/stats`** v Telegramu vypíše tabulku účtů: sledující, změna za 7 a 30 dní, posty za 30 dní a průměrný engagement na post.
 
 Nehotové: Apify kind `reddit-profile`, protože chybí fixture z reálného běhu actoru. Reddit profil zatím nemá metriky, zmínky jdou dál přes `reddit-mentions`.
+
+---
+
+## 11. Noční LLM okno na SPARKu
+
+Dohodnuto s Directorem (správce spark-broker). Hub drží frontu kampaní sám a LLM si od brokeru půjčí, jen když je co dělat.
+
+- `/post …` kampaň jen uloží a odpoví „⏳ počká na noční LLM okno“. Totéž platí pro návrh z nového YouTube videa.
+- Ve **00:15** (pražský čas, `LLM_WINDOW`) se hub podívá do fronty:
+  - **Fronta je prázdná:** žádný lease, GPU se nepřepíná.
+  - **Něco čeká:**
+    1. Hub si přes broker vezme lease (projekt `promohub`, priorita 15, služba `qwen36`, 20 min) a heartbeatuje každé 2 min.
+    2. Kampaně přepíše přes LiteLLM gateway (`openclaw-default`).
+    3. Pošle karty ke schválení do Telegramu.
+    4. Hned dá `done` s metrikou `campaigns ok/failed`, ta jde do souhrnu brokeru.
+- **SPARK do 60 min nedá lease** (třeba běží tvoje okno ComfyUI): hub lease stáhne, napíše to do Telegramu a kampaně počkají na další noc.
+- **Model neodpovídá** (500/503 nebo spojení selže, 3× po 30 s): hub dá `fail`, kampaně počkají a přijde zpráva. `/health` gateway je zelený i bez modelu, proto rozhoduje skutečné volání.
+- **`/post now …`** obejde frontu a drafty pošle hned, bez LLM.
+
+Nastavení v `~/stack/promohub/.env`:
+
+| Proměnná | Hodnota |
+|---|---|
+| `LLM_WINDOW` | `00:15` |
+| `SPARK_BROKER` | `http://<SPARK_HOST>:8100` (adresa z privátního infra.md, ne do repa) |
+| `SPARK_BROKER_TOKEN` | prázdné, broker token zatím nechce |
+| `LLM_BASE_URL` | `http://<SPARK_HOST>:8080/v1` |
+| `LLM_MODEL` | `openclaw-default` |
+| `LLM_API_KEY` | prázdné |
+
+Bez `LLM_WINDOW` hub volá LLM rovnou při `/post`; to má smysl jen s trvale běžícím modelem.

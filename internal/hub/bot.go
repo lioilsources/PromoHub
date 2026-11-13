@@ -140,8 +140,9 @@ func (h *Hub) handleMessage(ctx context.Context, m *tgbot.Message) string {
 	return "Neznámý příkaz. " + helpText
 }
 
-const helpText = `/post [slug] [cs|en] text… [odkaz] [media=ID]
+const helpText = `/post [now] [slug] [cs|en] text… [odkaz] [media=ID]
 Vytvoří kampaň a pošle draft pro každý účet. Fotka s popiskem /post … se přiloží.
+S nočním LLM oknem kampaň počká na noc; now = hned, bez LLM.
 Delší video nahraj přes make media a přidej media=ID.
 /connect platform:handle — připojí OAuth účet (Instagram, Threads, Facebook, YouTube, TikTok).
 /stats — srovnání účtů: sledující, změna za 7 a 30 dní, posty a engagement.`
@@ -157,6 +158,8 @@ opts:
 		switch {
 		case in.AppSlug == "" && h.appSlug(w) != "":
 			in.AppSlug = h.appSlug(w)
+		case w == "now":
+			in.Now = true
 		case w == "cs" || w == "en":
 			in.Lang = w
 		case strings.HasPrefix(w, "media="):
@@ -196,10 +199,13 @@ opts:
 	} else if id != 0 {
 		in.MediaIDs = append(in.MediaIDs, id)
 	}
-	camp, drafts, err := h.CreateCampaign(ctx, in)
+	camp, drafts, pending, err := h.CreateCampaign(ctx, in)
 	if err != nil {
 		h.log.Error("create campaign", "err", err)
 		return "Kampaň se nepodařilo vytvořit: " + err.Error()
+	}
+	if pending {
+		return fmt.Sprintf("⏳ Kampaň #%d počká na noční LLM okno (%s), drafty přijdou pak. Hned a bez LLM: /post now …", camp.ID, h.window.At)
 	}
 	if len(drafts) == 0 {
 		return "Žádný účet nebere tuhle appku a jazyk (accounts.yaml: apps, lang, publish)."

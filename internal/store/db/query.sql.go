@@ -613,7 +613,7 @@ func (q *Queries) GetApifyRun(ctx context.Context, runID string) (ApifyRun, erro
 }
 
 const getCampaign = `-- name: GetCampaign :one
-SELECT id, app_id, source_content_item_id, lang, title, body, link, media, status, tg_chat_id, tg_message_id, created_at FROM campaigns WHERE id = $1
+SELECT id, app_id, source_content_item_id, lang, title, body, link, media, status, tg_chat_id, tg_message_id, created_at, llm_status FROM campaigns WHERE id = $1
 `
 
 func (q *Queries) GetCampaign(ctx context.Context, id int64) (Campaign, error) {
@@ -632,6 +632,7 @@ func (q *Queries) GetCampaign(ctx context.Context, id int64) (Campaign, error) {
 		&i.TgChatID,
 		&i.TgMessageID,
 		&i.CreatedAt,
+		&i.LlmStatus,
 	)
 	return i, err
 }
@@ -799,9 +800,9 @@ func (q *Queries) InsertApifyRun(ctx context.Context, arg InsertApifyRunParams) 
 }
 
 const insertCampaign = `-- name: InsertCampaign :one
-INSERT INTO campaigns (app_id, source_content_item_id, lang, title, body, link, media)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, app_id, source_content_item_id, lang, title, body, link, media, status, tg_chat_id, tg_message_id, created_at
+INSERT INTO campaigns (app_id, source_content_item_id, lang, title, body, link, media, llm_status)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, app_id, source_content_item_id, lang, title, body, link, media, status, tg_chat_id, tg_message_id, created_at, llm_status
 `
 
 type InsertCampaignParams struct {
@@ -812,6 +813,7 @@ type InsertCampaignParams struct {
 	Body                string
 	Link                *string
 	Media               []byte
+	LlmStatus           string
 }
 
 func (q *Queries) InsertCampaign(ctx context.Context, arg InsertCampaignParams) (Campaign, error) {
@@ -823,6 +825,7 @@ func (q *Queries) InsertCampaign(ctx context.Context, arg InsertCampaignParams) 
 		arg.Body,
 		arg.Link,
 		arg.Media,
+		arg.LlmStatus,
 	)
 	var i Campaign
 	err := row.Scan(
@@ -838,6 +841,7 @@ func (q *Queries) InsertCampaign(ctx context.Context, arg InsertCampaignParams) 
 		&i.TgChatID,
 		&i.TgMessageID,
 		&i.CreatedAt,
+		&i.LlmStatus,
 	)
 	return i, err
 }
@@ -1409,6 +1413,44 @@ func (q *Queries) PendingEvents(ctx context.Context, arg PendingEventsParams) ([
 	return items, nil
 }
 
+const pendingLLMCampaigns = `-- name: PendingLLMCampaigns :many
+SELECT id, app_id, source_content_item_id, lang, title, body, link, media, status, tg_chat_id, tg_message_id, created_at, llm_status FROM campaigns WHERE llm_status = 'pending' ORDER BY id
+`
+
+func (q *Queries) PendingLLMCampaigns(ctx context.Context) ([]Campaign, error) {
+	rows, err := q.db.Query(ctx, pendingLLMCampaigns)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Campaign{}
+	for rows.Next() {
+		var i Campaign
+		if err := rows.Scan(
+			&i.ID,
+			&i.AppID,
+			&i.SourceContentItemID,
+			&i.Lang,
+			&i.Title,
+			&i.Body,
+			&i.Link,
+			&i.Media,
+			&i.Status,
+			&i.TgChatID,
+			&i.TgMessageID,
+			&i.CreatedAt,
+			&i.LlmStatus,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const postponeCollector = `-- name: PostponeCollector :exec
 UPDATE collector_state SET next_run_at = $3 WHERE account_id = $1 AND capability = $2
 `
@@ -1609,6 +1651,20 @@ func (q *Queries) SentDraftsForAccount(ctx context.Context, arg SentDraftsForAcc
 		return nil, err
 	}
 	return items, nil
+}
+
+const setCampaignLLMStatus = `-- name: SetCampaignLLMStatus :exec
+UPDATE campaigns SET llm_status = $2 WHERE id = $1
+`
+
+type SetCampaignLLMStatusParams struct {
+	ID        int64
+	LlmStatus string
+}
+
+func (q *Queries) SetCampaignLLMStatus(ctx context.Context, arg SetCampaignLLMStatusParams) error {
+	_, err := q.db.Exec(ctx, setCampaignLLMStatus, arg.ID, arg.LlmStatus)
+	return err
 }
 
 const setCampaignMessage = `-- name: SetCampaignMessage :exec

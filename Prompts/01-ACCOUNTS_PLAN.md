@@ -298,7 +298,7 @@ IFTTT applety `publish_*`: trigger Webhooks „Receive a web request“ (ne JSON
 5. Žádat o audity (YouTube API, TikTok, Pinterest Standard, Meta Live)? **Výchozí: ne.** Rozhodnout po měsíci provozu podle `/stats`.
 6. Má Olin starší schválenou Reddit API aplikaci? Pokud ano, přidá se cesta `api`; jinak se s ní nepočítá.
 7. X API jako placená záloha publikace (odpovědi na tweety, které IFTTT neumí)? **Výchozí: neimplementovat.**
-8. Jak hub dostane LLM kapacitu na SPARKu (stálá služba za gateway, nebo okno přes broker)? Do rozhodnutí běží composer v0.
+8. ~~Jak hub dostane LLM kapacitu na SPARKu?~~ Rozhodnuto: noční okno přes spark-broker (RUNBOOK §11, PR #6).
 9. Je OrbitronTactics na Steamu nebo itch.io? Pokud ano, přidat adaptéry (Steam má veřejné JSON recenze, itch.io API klíč).
 
 Otázky z 00 §13 platí dál, kromě č. 1 (FB Page už pro Instagram není potřeba).

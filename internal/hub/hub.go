@@ -56,6 +56,7 @@ type Hub struct {
 	kickMu         sync.Mutex
 	kicked         map[string]time.Time
 	oauth          *oauth.Store // nil without PROMOHUB_SECRET_KEY
+	window         *Window      // night LLM window; nil = compose right away
 	lastTokenCheck time.Time
 	jobs           map[jobKey]job
 	terms          []string
@@ -86,6 +87,7 @@ type Deps struct {
 	Admins []int64
 	LLM    *composer.LLM
 	OAuth  *oauth.Store
+	Window *Window
 }
 
 func New(d Deps) *Hub {
@@ -163,6 +165,7 @@ func (h *Hub) Run(ctx context.Context) {
 	go h.loop(ctx, "runs", h.wakeRuns, h.processPendingRuns)
 	go h.loop(ctx, "collect", nil, h.collectDue)
 	go h.loop(ctx, "tokens", nil, h.checkTokens)
+	go h.loop(ctx, "llm-window", nil, h.llmWindowTick)
 	if h.bot != nil {
 		if err := h.recoverStranded(ctx); err != nil {
 			h.log.Error("recover stranded drafts", "err", err)

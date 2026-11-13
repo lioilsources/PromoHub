@@ -96,12 +96,12 @@ func (l *LLM) post(ctx context.Context, body, out any) error {
 	}
 	resp, err := hc.Do(r)
 	if err != nil {
-		return fmt.Errorf("llm: %w", err)
+		return &StatusError{Body: err.Error()} // transport error: the model is not reachable
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode/100 != 2 {
-		return fmt.Errorf("llm: HTTP %d: %.200s", resp.StatusCode, raw)
+		return &StatusError{Code: resp.StatusCode, Body: fmt.Sprintf("%.200s", raw)}
 	}
 	return json.Unmarshal(raw, out)
 }
@@ -111,4 +111,23 @@ func appName(c Campaign) string {
 		return c.App.Name
 	}
 	return ""
+}
+
+// StatusError is a failed call; Code 0 means the endpoint was not reachable.
+type StatusError struct {
+	Code int
+	Body string
+}
+
+func (e *StatusError) Error() string { return fmt.Sprintf("llm: HTTP %d: %s", e.Code, e.Body) }
+
+// Unavailable reports an answer that means "the model is not up (yet)": no connection, 500,
+// 502, 503 or 504. The gateway's /health is green even without a model, so only a real
+// completion tells.
+func Unavailable(err error) bool {
+	var se *StatusError
+	if !errors.As(err, &se) {
+		return false
+	}
+	return se.Code == 0 || se.Code >= 500
 }

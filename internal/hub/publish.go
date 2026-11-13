@@ -41,41 +41,66 @@ type CampaignInput struct {
 	Link            string
 	MediaIDs        []int64
 	SourceContentID *int64
+	// Now composes right away without the LLM even when the night window is configured.
+	Now bool
 }
 
-// CreateCampaign composes one draft per account that takes the campaign's app and language.
-// Accounts whose path is not available yet (no API publisher, no IFTTT key) get a manual draft.
-func (h *Hub) CreateCampaign(ctx context.Context, in CampaignInput) (db.Campaign, []db.Draft, error) {
+// CreateCampaign stores a campaign and composes one draft per account that takes its app and
+// language. With the night LLM window configured (and !in.Now) the campaign only waits:
+// pending=true, the drafts come from the window. Accounts whose path is not available (no API
+// publisher, no IFTTT key) get a manual draft.
+func (h *Hub) CreateCampaign(ctx context.Context, in CampaignInput) (camp db.Campaign, drafts []db.Draft, pending bool, err error) {
 	if in.Lang == "" {
 		in.Lang = "en"
 	}
-	var app *config.App
 	var appID *int64
-	for i := range h.files.Apps {
-		if h.files.Apps[i].Slug == in.AppSlug {
-			app = &h.files.Apps[i]
-			if id, ok := h.appIDs[in.AppSlug]; ok {
-				appID = &id
-			}
-		}
+	if id, ok := h.appIDs[in.AppSlug]; ok {
+		appID = &id
+	}
+	status := "none"
+	if h.window != nil && !in.Now {
+		status = "pending"
 	}
 	mediaJSON, _ := json.Marshal(nonNilIDs(in.MediaIDs))
-	camp, err := h.store.InsertCampaign(ctx, db.InsertCampaignParams{
+	camp, err = h.store.InsertCampaign(ctx, db.InsertCampaignParams{
 		AppID: appID, SourceContentItemID: in.SourceContentID, Lang: in.Lang, Title: nz(in.Title),
-		Body: in.Body, Link: nz(in.Link), Media: mediaJSON,
+		Body: in.Body, Link: nz(in.Link), Media: mediaJSON, LlmStatus: status,
 	})
-	if err != nil {
-		return camp, nil, err
+	if err != nil || status == "pending" {
+		return camp, nil, status == "pending", err
 	}
-	cc := composer.Campaign{Slug: fmt.Sprintf("c%d", camp.ID), App: app, Lang: in.Lang, Title: in.Title,
-		Body: in.Body, Link: in.Link, HasMedia: len(in.MediaIDs) > 0}
+	cc, targets := h.composerInput(camp, in.AppSlug)
+	var bodies map[string]string
+	if h.window == nil { // without a window the LLM (if any) is called directly
+		bodies = h.llmBodies(ctx, cc, targets)
+	}
+	drafts, err = h.composeDrafts(ctx, camp, cc, targets, bodies)
+	return camp, drafts, false, err
+}
+
+// composerInput turns a campaign row into composer input and the accounts it goes to.
+func (h *Hub) composerInput(camp db.Campaign, slug string) (composer.Campaign, []config.Account) {
+	var app *config.App
+	for i := range h.files.Apps {
+		if h.files.Apps[i].Slug == slug {
+			app = &h.files.Apps[i]
+		}
+	}
+	var media []int64
+	_ = json.Unmarshal(camp.Media, &media)
+	cc := composer.Campaign{Slug: fmt.Sprintf("c%d", camp.ID), App: app, Lang: camp.Lang, Title: deref(camp.Title),
+		Body: camp.Body, Link: deref(camp.Link), HasMedia: len(media) > 0}
 	var targets []config.Account
 	for _, a := range h.files.Accounts.Accounts {
-		if a.Publish != platform.ViaNone && a.Promotes(in.AppSlug) && a.Speaks(in.Lang) {
+		if a.Publish != platform.ViaNone && a.Promotes(slug) && a.Speaks(camp.Lang) {
 			targets = append(targets, a)
 		}
 	}
-	bodies := h.llmBodies(ctx, cc, targets)
+	return cc, targets
+}
+
+// composeDrafts writes one draft per target; bodies (LLM output) replace the campaign body.
+func (h *Hub) composeDrafts(ctx context.Context, camp db.Campaign, cc composer.Campaign, targets []config.Account, bodies map[string]string) ([]db.Draft, error) {
 	var drafts []db.Draft
 	for _, a := range targets {
 		c := cc
@@ -92,18 +117,15 @@ func (h *Hub) CreateCampaign(ctx context.Context, in CampaignInput) (db.Campaign
 			CampaignID: camp.ID, AccountID: h.accountIDs[a.Key()], Via: string(via), Text: d.Text, Extra: extra,
 		})
 		if err != nil && !store.NoRows(err) {
-			return camp, drafts, fmt.Errorf("draft %s: %w", a.Key(), err)
+			return drafts, fmt.Errorf("draft %s: %w", a.Key(), err)
 		}
 		drafts = append(drafts, row)
 	}
-	return camp, drafts, nil
+	return drafts, nil
 }
 
-// llmBodies asks the LLM for per-account bodies; any failure means composer v0 for all.
-func (h *Hub) llmBodies(ctx context.Context, c composer.Campaign, accts []config.Account) map[string]string {
-	if h.llm == nil || len(accts) == 0 {
-		return nil
-	}
+// llmTargets describes the accounts for the LLM prompt.
+func llmTargets(c composer.Campaign, accts []config.Account) []composer.Target {
 	var ts []composer.Target
 	for _, a := range accts {
 		spec, _ := platform.Lookup(a.Platform)
@@ -113,7 +135,15 @@ func (h *Hub) llmBodies(ctx context.Context, c composer.Campaign, accts []config
 		}
 		ts = append(ts, composer.Target{Key: a.Key(), Platform: a.Platform, Limit: spec.TextLimit, Lang: lang})
 	}
-	out, err := h.llm.Rewrite(ctx, c, ts)
+	return ts
+}
+
+// llmBodies asks the LLM for per-account bodies; any failure means composer v0 for all.
+func (h *Hub) llmBodies(ctx context.Context, c composer.Campaign, accts []config.Account) map[string]string {
+	if h.llm == nil || len(accts) == 0 {
+		return nil
+	}
+	out, err := h.llm.Rewrite(ctx, c, llmTargets(c, accts))
 	if err != nil {
 		h.log.Warn("llm composer failed, using v0", "err", err)
 		return nil
@@ -583,10 +613,13 @@ func (h *Hub) proposeFor(ctx context.Context, f freshPost) {
 		slug = a.Slug
 	}
 	id := f.contentID
-	camp, drafts, err := h.CreateCampaign(ctx, CampaignInput{AppSlug: slug, Title: f.title, Body: f.title, Link: f.url, SourceContentID: &id})
+	camp, drafts, pending, err := h.CreateCampaign(ctx, CampaignInput{AppSlug: slug, Title: f.title, Body: f.title, Link: f.url, SourceContentID: &id})
 	if err != nil {
 		h.log.Error("propose campaign", "content", f.contentID, "err", err)
 		return
+	}
+	if pending {
+		return // the night window composes it
 	}
 	// The video's own account would just repost itself.
 	var rest []db.Draft

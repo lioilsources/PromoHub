@@ -34,6 +34,7 @@ make test-db            # TEST_PG_PORT=55439, když je 55432 obsazený
 - `internal/composer` — texty per účet (v0 deterministický, volitelně LLM).
 - `internal/tgbot`, `internal/hub/bot.go` — schvalovací bot; `internal/hub/publish.go` — stavový automat draftů.
 - `internal/media` — uložení souborů, MP4 sonda, `/media/{token}`.
+- `internal/sparkbroker`, `internal/hub/window.go` — noční LLM okno: lease přes spark-broker jen když čekají kampaně. Na SPARKu hub nic nespouští.
 - `internal/store` — migrace a sqlc. Po změně `query.sql` spusť `make generate`; vygenerovaný kód needituj.
 
 ## Pravidla
