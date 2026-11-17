@@ -1,2 +1,15 @@
 bin/
 .env
+# devconv:start
+.env.*
+!.env.example
+*.p8
+*.p12
+*.jks
+key.properties
+.DS_Store
+.claude/settings.local.json
+CLAUDE.local.md
+*.test
+*.out
+# devconv:end
